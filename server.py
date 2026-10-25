@@ -35,7 +35,17 @@ async def demo_access(request:Request, call_next):
         scheme, encoded=auth.split(' ',1)
         raw=base64.b64decode(encoded,validate=True).decode('utf-8')
         given_user,given_password=raw.split(':',1)
-        valid=scheme.lower()=='basic' and hmac.compare_digest(given_user,user) and hmac.compare_digest(given_password,password)
+        valid = (
+    scheme.lower() == 'basic'
+    and hmac.compare_digest(
+        given_user.encode('utf-8'),
+        user.encode('utf-8')
+    )
+    and hmac.compare_digest(
+        given_password.encode('utf-8'),
+        password.encode('utf-8')
+    )
+)
     except (ValueError,UnicodeError):
         valid=False
     if not valid:
