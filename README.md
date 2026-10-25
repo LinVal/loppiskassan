@@ -66,3 +66,17 @@ försökas igen. Start av serverköp rensar de förifyllda demo-varorna.
 
 **Viktigt:** Betalningen verifieras fortfarande manuellt. Ingen fullständig
 offlineförsäljning finns. Testa visuellt och funktionellt innan användning.
+
+## Fix: tom bildyta vid nästa kund
+När serverköpet startas eller avslutas rensas både varulistan och fotoytan. Tidigare demobild ska inte visas för en ny kund. Vid återställning försöker kassan hämta den aktuella bildens serverkopia igen.
+
+## UX-justeringar
+
+- Manuellt tillagda prislappar är automatiskt markerade som kontrollerade.
+  Säljnummer och pris måste fortfarande anges och valideras innan köpet sparas.
+- AI-tolkade prislappar kräver fortfarande individuell granskning.
+- Administrationen har sökfilter och antal synliga säljare.
+- Säljarportalen visar registrerad försäljning tydligare utan att påstå att
+  beloppet är en slutlig utbetalning.
+
+Kontrollera GitHub Actions samt flödena manuellt före Heroku-deploy.
