@@ -80,3 +80,9 @@ När serverköpet startas eller avslutas rensas både varulistan och fotoytan. T
   beloppet är en slutlig utbetalning.
 
 Kontrollera GitHub Actions samt flödena manuellt före Heroku-deploy.
+
+## Prisregel
+Alla varupriser måste vara positiva hela kronor delbara med fem. Regeln
+valideras i kassans gränssnitt och i serverns Pydantic-modell. AI-priser
+som inte följer regeln markeras för korrigering, aldrig automatisk avrundning.
+Befintliga försäljningar ändras inte.

@@ -3,7 +3,7 @@ import os, uuid, secrets, datetime, pathlib, hmac, base64, json, logging
 from fastapi import FastAPI, HTTPException, UploadFile, File, Header, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import create_engine, text
 from io import BytesIO
 from PIL import Image, ImageOps
@@ -51,7 +51,15 @@ class NewSession(BaseModel):
 class Item(BaseModel):
     seller: str=Field(pattern=r'^\d{1,4}$')
     desc: str=Field(default='',max_length=200)
-    price: int=Field(gt=0,le=1000000)
+    price: int=Field(gt=0,le=1000000, strict=True)
+
+    @field_validator('price')
+    @classmethod
+    def multiple_of_five(cls, value: int) -> int:
+        if value % 5 != 0:
+            raise ValueError('Priset måste vara delbart med 5 kr')
+        return value
+
 class Sale(BaseModel):
     items: list[Item]=Field(min_length=1)
     method: str=Field(max_length=40)
@@ -209,7 +217,7 @@ async def analyze_photo(sid: str, pid: str):
             try:return max(0,min(100,float(r.get(k,default))))
             except (TypeError,ValueError):return default
         cleaned.append({'id':i,'seller':seller,'price':price,'desc':str(r.get('desc') or '')[:200],
-          'uncertain':bool(r.get('uncertain',True)) or not seller or not price,
+          'uncertain':bool(r.get('uncertain',True)) or not seller or not price or price % 5 != 0,
           'x':coord('x',0),'y':coord('y',0),'w':coord('w',0),'h':coord('h',0)})
     return {'items':cleaned,'count':len(cleaned),'note':str(result.get('note') or '')[:500],
        'warning':'AI kan missa lappar eller läsa fel. Kontrollera ALLA lappar mot fotot innan försäljning.'}
