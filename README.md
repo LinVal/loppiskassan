@@ -46,3 +46,9 @@ GitHub Actions kör regressionstester och PostgreSQL-tester. Tester av återför
 Detta är fortfarande ett testsystem. Kontrollera behörigheter på API-nivå, betalningsflöden, säkerhetskopior och personuppgiftshantering före verklig drift.
 
 Mer information om affärsregler finns i `REGLER_OCH_TESTER.md`.
+
+## Återställning efter avbrott
+
+Kassan sparar påbörjat köp och sessions-ID i webbläsarens `localStorage`. Vid omladdning kontrollerar den servern innan den återupptar köpet. Om köpet redan är registrerat rensas utkastet. Vid osäker nätverksstatus behålls utkastet; starta inte ett nytt köp förrän status har kontrollerats.
+
+Detta skyddar mot vanliga omladdningar och upprepade anrop inom samma session, men är **inte fullständigt offlinestöd**. Lokal lagring är knuten till en viss webbläsare och kan raderas. Verifiera manuellt med två flikar, förlorad uppkoppling och flera kassor innan verklig drift.

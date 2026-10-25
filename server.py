@@ -65,6 +65,18 @@ def new_session(payload:NewSession):
         db.execute(text('INSERT INTO sessions VALUES (:id,:r,:c,:s)'),dict(id=sid,r=payload.register_no,c=iso(now()),s='open'))
     return {'session_id':sid,'register_no':payload.register_no}
 
+@app.get('/api/sessions/{sid}/status')
+def sale_session_status(sid: str):
+    with engine.connect() as db:
+        row = session_row(db, sid)
+        if not row:
+            raise HTTPException(404, 'Köp saknas')
+        sale = db.execute(text('SELECT id,total FROM sales WHERE session_id=:s'), {'s':sid}).mappings().first()
+    return {'status': 'closed' if sale else row['status'],
+            'sale_id': sale['id'] if sale else None,
+            'total': sale['total'] if sale else None}
+
+
 @app.post('/api/sessions/{sid}/pair')
 def pair(sid:str,request:Request):
     token=secrets.token_urlsafe(24)

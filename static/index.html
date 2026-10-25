@@ -5,12 +5,51 @@ const initial=[{"id": 1, "seller": "161", "desc": "Stl 28", "price": 85, "x": 12
 </script><script>
 (()=>{
 let sid=null, seen=new Set(), poll=null, latestPhoto=null;
+const draftKey='loppiskassan.activeSale.'+location.pathname;
+let restoring=false, submitting=false;
+function persistDraft(){
+ if(restoring||!sid)return;
+ try{localStorage.setItem(draftKey,JSON.stringify({
+   sid, register:el('register').value, items, latestPhoto,
+   method:el('method').value, recipient:el('recipient').value,
+   confirmed:el('confirmed').checked, savedAt:Date.now()
+ }));}catch(e){status('Varning: webbläsaren kunde inte spara utkastet.')}
+}
+function forgetDraft(){localStorage.removeItem(draftKey)}
+async function restoreDraft(){
+ let draft;try{draft=JSON.parse(localStorage.getItem(draftKey)||'null')}catch(e){forgetDraft();return}
+ if(!draft?.sid)return;
+ restoring=true;
+ try{
+   let response=await fetch('/api/sessions/'+encodeURIComponent(draft.sid)+'/status',{cache:'no-store'});
+   if(!response.ok)throw Error('Kan inte kontrollera tidigare köp');
+   let state=await response.json();
+   if(state.status==='closed'){
+     forgetDraft();
+     status('Föregående köp är redan sparat'+(state.sale_id?' ('+state.sale_id.slice(0,8)+')':'')+'. Starta nytt köp.');
+     return;
+   }
+   sid=draft.sid;latestPhoto=draft.latestPhoto||null;
+   el('register').value=draft.register||el('register').value;
+   items=Array.isArray(draft.items)?draft.items:[];
+   el('method').value=draft.method||el('method').value;
+   el('recipient').value=draft.recipient||'';
+   el('confirmed').checked=!!draft.confirmed;
+   el('pairMobile').disabled=false;
+   el('analyzePhoto').disabled=!latestPhoto;
+   status('Tidigare påbörjat köp återställt. Kontrollera raderna före betalning.');
+   render();
+   if(poll)clearInterval(poll);poll=setInterval(check,2500);
+ }catch(e){status('Tidigare köp finns sparat lokalt. Anslut till servern innan du fortsätter.');}
+ finally{restoring=false}
+}
+
 const el=id=>document.getElementById(id);
 const status=s=>el('serverStatus').textContent=s;
 async function api(path,options={}){let res=await fetch(path,options);let data=await res.json();if(!res.ok)throw Error(data.detail||'Serverfel');return data}
-async function create(){try{let d=await api('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({register_no:el('register').value})});sid=d.session_id;latestPhoto=null;el('analyzePhoto').disabled=true;seen.clear();status('Kassa '+d.register_no+' · aktivt serverköp');el('pairMobile').disabled=false;el('pairView').style.display='none';el('photoStatus').textContent='Köp-ID: '+sid.slice(0,8);if(poll)clearInterval(poll);poll=setInterval(check,2500)}catch(e){alert('Kan inte nå servern: '+e.message)}}
+async function create(){try{let d=await api('/api/sessions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({register_no:el('register').value})});sid=d.session_id;latestPhoto=null;persistDraft();el('analyzePhoto').disabled=true;seen.clear();status('Kassa '+d.register_no+' · aktivt serverköp');el('pairMobile').disabled=false;el('pairView').style.display='none';el('photoStatus').textContent='Köp-ID: '+sid.slice(0,8);if(poll)clearInterval(poll);poll=setInterval(check,2500)}catch(e){alert('Kan inte nå servern: '+e.message)}}
 async function pair(){if(!sid)return;try{let d=await api('/api/sessions/'+sid+'/pair',{method:'POST'});el('pairQR').src='/api/pair/qr?url='+encodeURIComponent(d.url);el('pairLink').href=d.url;el('pairLink').textContent=d.url;el('pairView').style.display='block';status('Väntar på mobilfoto')}catch(e){alert(e.message)}}
-async function check(){if(!sid)return;try{let d=await api('/api/sessions/'+sid+'/photos');for(let p of d.photos){if(seen.has(p.id))continue;seen.add(p.id);latestPhoto=p.id;el('analyzePhoto').disabled=false;let res=await fetch(p.url);let blob=await res.blob();let url=URL.createObjectURL(blob);imageSrc=url;items=[];selected=0;render();el('photoStatus').textContent='✓ Bild mottagen '+new Date().toLocaleTimeString('sv-SE')+' – klicka på Läs prislappar med AI.';status('Bild mottagen')} }catch(e){status('Servern kan inte nås')}}
+async function check(){if(!sid)return;try{let d=await api('/api/sessions/'+sid+'/photos');for(let p of d.photos){if(seen.has(p.id))continue;seen.add(p.id);latestPhoto=p.id;persistDraft();el('analyzePhoto').disabled=false;let res=await fetch(p.url);let blob=await res.blob();let url=URL.createObjectURL(blob);imageSrc=url;items=[];selected=0;render();persistDraft();el('photoStatus').textContent='✓ Bild mottagen '+new Date().toLocaleTimeString('sv-SE')+' – klicka på Läs prislappar med AI.';status('Bild mottagen')} }catch(e){status('Servern kan inte nås')}}
 el('createSession').onclick=create;el('pairMobile').onclick=pair;
 el('analyzePhoto').onclick=async()=>{
  if(!sid||!latestPhoto)return;
@@ -18,7 +57,7 @@ el('analyzePhoto').onclick=async()=>{
  el('analyzePhoto').disabled=true;el('aiHint').textContent='AI läser bilden, det kan ta en stund…';
  try{
   let data=await api('/api/sessions/'+sid+'/photos/'+latestPhoto+'/analyze',{method:'POST'});
-  items=data.items.map(x=>({...x,uncertain:true}));selected=items[0]?.id||0;render();
+  items=data.items.map(x=>({...x,uncertain:true}));selected=items[0]?.id||0;render();persistDraft();
   el('photoStatus').textContent='AI hittade '+data.count+' lappar. '+(data.note||'')+' Kontrollera antalet och varje rad mot bilden.';
   el('aiHint').textContent='Alla AI-rader är markerade för manuell kontroll.';
  }catch(e){el('aiHint').textContent='AI misslyckades: '+e.message;alert(e.message)}
@@ -31,10 +70,17 @@ el('finish').onclick=async()=>{
  if(!items.length||items.some(x=>!/^[0-9]{1,4}$/.test(String(x.seller))||!(Number(x.price)>0)))return alert('Kontrollera att alla lappar har säljnummer och positivt pris.');
  if(items.some(x=>x.uncertain))return alert('Kontrollera alla osäkra lappar först.');
  if(!el('confirmed').checked||!el('recipient').value.trim())return alert('Bekräfta betalningen och ange mottagare.');
- el('finish').disabled=true;
+ if(submitting)return;
+ submitting=true;persistDraft();el('finish').disabled=true;
  try{let data=await api('/api/sessions/'+sid+'/sale',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:items.map(x=>({seller:String(x.seller),desc:x.desc,price:Number(x.price)})),method:el('method').value,recipient:el('recipient').value.trim(),payment_confirmed:true})});
- alert('✓ Köp sparat på servern. '+data.total+' kr'+(data.already_saved?' (redan registrerat)':''));sid=null;latestPhoto=null;el('analyzePhoto').disabled=true;if(poll)clearInterval(poll);el('pairMobile').disabled=true;el('pairView').style.display='none';status('Köp klart – starta nytt serverköp');items=[];imageSrc=defaultImage;el('confirmed').checked=false;el('recipient').value='';render()
- }catch(e){alert('Köpet kunde inte sparas: '+e.message)}finally{el('finish').disabled=false}
+ forgetDraft();alert('✓ Köp sparat på servern. '+data.total+' kr'+(data.already_saved?' (redan registrerat)':''));sid=null;latestPhoto=null;el('analyzePhoto').disabled=true;if(poll)clearInterval(poll);el('pairMobile').disabled=true;el('pairView').style.display='none';status('Köp klart – starta nytt serverköp');items=[];imageSrc=defaultImage;el('confirmed').checked=false;el('recipient').value='';render()
+ }catch(e){alert('Köpet kunde inte sparas: '+e.message)}finally{submitting=false;el('finish').disabled=false}
 };
+['input','change','click'].forEach(event=>document.addEventListener(event,()=>{
+ if(!sid||submitting)return;
+ setTimeout(persistDraft,0);
+},true));
+window.addEventListener('pagehide',persistDraft);
+restoreDraft();
 })();
 </script></body></html>
