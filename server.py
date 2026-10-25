@@ -31,7 +31,7 @@ app=FastAPI(title='Loppiskassan – Heroku test')
 async def demo_access(request:Request, call_next):
     # The temporary mobile page and one-time upload link are intentionally token-based.
     path=request.url.path
-    if path == '/health' or path == '/mobile' or path.startswith('/api/mobile/'):
+    if path == '/health' or path == '/mobile' or path == '/seller' or path.startswith('/api/portal/') or path.startswith('/api/mobile/'):
         return await call_next(request)
     user=os.getenv('DEMO_USER')
     password=os.getenv('DEMO_PASSWORD')
@@ -53,6 +53,7 @@ async def demo_access(request:Request, call_next):
 def health(): return {'ok':True}
 
 with engine.begin() as db:
+    if engine.dialect.name=='postgresql': db.execute(text('SELECT pg_advisory_xact_lock(87420013)'))
     db.execute(text('CREATE TABLE IF NOT EXISTS sessions (id VARCHAR(64) PRIMARY KEY, register_no VARCHAR(16) NOT NULL, created_at VARCHAR(40) NOT NULL, status VARCHAR(20) NOT NULL)'))
     db.execute(text('CREATE TABLE IF NOT EXISTS pairings (token VARCHAR(100) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, expires_at VARCHAR(40) NOT NULL, used INTEGER NOT NULL DEFAULT 0)'))
     db.execute(text('CREATE TABLE IF NOT EXISTS photos (id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, filename VARCHAR(150) NOT NULL, created_at VARCHAR(40) NOT NULL)'))
@@ -249,4 +250,7 @@ def summary():
 
 @app.get('/mobile')
 def mobile(): return FileResponse(ROOT/'static'/'mobile.html')
+from v4_routes import router as v4_router, install as install_v4
+install_v4(engine)
+app.include_router(v4_router)
 app.mount('/',StaticFiles(directory=ROOT/'static',html=True),name='frontend')

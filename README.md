@@ -1,40 +1,33 @@
-# Loppiskassan v3 — Heroku, Bucketeer och AI
+# Loppiskassan v4 – GitHub + Heroku
 
-## Nytt i version 3
-- Bilder lagras i **privat Bucketeer** via de automatiska `BUCKETEER_*`-variablerna.
-- `OPENAI_API_KEY` aktiverar knappen **Läs prislappar med AI** efter ett mobilfoto.
-- Alla AI-rader markeras för manuell kontroll. AI kan missa lappar. Ingen försäljning sparas av AI.
-- UTF-8-fix för svenska tecken i demo-inloggningen.
+Uppdatering av fungerande v3. Behåller QR-mobilkamera, Bucketeer/S3, AI-avläsning, befintligt kassagränssnitt och PostgreSQL. Lägger till säljarregister, privat läsportal, gemensam försäljningshistorik, rapporter, CSV och spårbara justeringar.
 
-## Uppdatera befintligt GitHub-repository
-Packa upp ZIP och kopiera filerna till roten av ditt befintliga GitHub-repository. Ersätt `server.py`, `requirements.txt`, `static/index.html` m.fl. Committa och välj Deploy Branch i Heroku om automatisk deploy inte är på.
+## Installera
 
-## Heroku Config Vars
-Heroku har redan skapat `DATABASE_URL` och följande från Bucketeer:
-- `BUCKETEER_BUCKET_NAME`
-- `BUCKETEER_AWS_ACCESS_KEY_ID`
-- `BUCKETEER_AWS_SECRET_ACCESS_KEY`
-- `BUCKETEER_AWS_REGION`
+1. Packa upp ZIP-filen och **ersätt filerna i ditt befintliga privata GitHub-repository**. Behåll befintlig Heroku-app och PostgreSQL. Publicera samma GitHub-branch i Heroku (Deploy Branch eller automatisk deploy).
+2. Behåll `DEMO_USER`, `DEMO_PASSWORD`, `PUBLIC_BASE_URL=https://loppiskassan-07d30648d332.herokuapp.com`, `OPENAI_API_KEY`, `OPENAI_MODEL` och de automatiska `BUCKETEER_*`-variablerna. Lägg **inte** API-nycklar i GitHub.
+3. Kontrollera `/health`, kassan `/`, administration `/admin` och QR-fotografering. Tabellen skapas automatiskt. Säkerhetskopiera Postgres före driftsättning.
+4. Registrera säljare under `/admin`. Klicka **Skapa privat länk** och dela länken med respektive säljare. En ny länk spärrar föregående. Portalen är läsbar utan personalens Basic Auth, men kräver den hemliga länken.
+5. Registrera ett testköp i kassan och kontrollera att det syns i `/admin` och i rätt säljares portal. Gör en testkorrigering och kontrollera CSV/rapporter.
 
-Behåll `DEMO_USER`, `DEMO_PASSWORD` och `PUBLIC_BASE_URL`. Lägg till:
-- `OPENAI_API_KEY` = din hemliga API-nyckel (lägg **inte** i GitHub)
-- `OPENAI_MODEL` = `gpt-4.1-mini` (valfri)
+## Funktioner och viktiga begränsningar
 
-**Viktigt:** OpenAI API-fakturering är separat från ChatGPT-abonnemang. Bilder skickas till AI-tjänsten när du klickar på knappen. Använd enbart testdata tills du har gått igenom dataskydd och behörigheter.
+- `/admin`: säljarregister (nummer, namn, e-post, telefon, aktiv), historik med varurader, korrigeringar med namn/orsak och rapporter per säljare/kassa/betalsätt/dag.
+- `/seller?token=...`: läsportal för en säljare, visar registrerade varor och netto. Länken är en hemlig åtkomstnyckel – skicka den privat och dela inte i offentliga kanaler. Den kan återkallas genom att skapa en ny.
+- 10 kassor kan använda samma PostgreSQL; transaktioner och unikt session-ID hindrar dubbelsparande av samma köp. **Ingen belastningstest med 10 samtidiga kassor har utförts.**
+- Historik och rapporter hämtas från servern. Det äldre kassagränssnittets *lokala demohistorik* är fortfarande bara webbläsardata – använd `/admin` för verklig serverhistorik.
+- Korrigeringar läggs till som separata poster, originalköp skrivs inte över. Inga återbetalningar utförs automatiskt. Netto per säljare och kassa tar hänsyn till justeringar. Dagsrapportens korrigeringar visas efter korrigeringsdatum i UTC, inte nödvändigtvis samma dag som köpet.
+- Säljnummer på prislappar **matchas inte automatiskt mot säljarregistret vid köp** ännu. Registrera och kontrollera säljnummer före verklig användning.
+- Fortfarande **testsystem**: Basic Auth är delad mellan personal, portalens länkar kan vidarebefordras, ingen rollstyrning/individuell kassainloggning, ingen Swish-verifiering, ingen automatisk avräkning, ingen robust offline-synk och ingen GDPR-granskning. Använd inte för riktiga person- eller betalningsuppgifter utan säkerhetsgenomgång.
+- Heroku-app och Bucketeer kan lagra uppgifter i USA. Granska personuppgiftsbiträdesavtal och lagringsregion innan riktig drift.
 
-## Testa
-1. Starta serverköp på datorn.
-2. Koppla mobilen med QR-kod och fotografera A4-arket.
-3. Bilden visas på datorn och lagras privat i Bucketeer.
-4. Klicka **Läs prislappar med AI**.
-5. Jämför antal lappar, säljnummer och priser med originalbilden. Rätta och markera rader som kontrollerade.
-6. Bekräfta betalningen manuellt och spara serverköpet.
+## Lokalt
 
-## Begränsningar
-- Testprototyp, inte färdig produktionskassa. Basic Auth är gemensam för alla kassor.
-- Mobillänkar är engångstoken. Håll länkar privata.
-- AI-resultat kan vara fel eller missa lappar; kräver manuell kontroll.
-- HEIC kan lagras, men AI kräver JPEG/PNG i denna version.
-- Lokal lagring används om ingen S3/Bucketeer är konfigurerad och försvinner vid dyno-omstart.
-- PostgreSQL-tabeller skapas fortfarande vid import. Kör en webbarbetare under testerna; använd databasmigreringar före skarp drift.
-- Ingen automatisk betalningsverifiering, ingen riktig offline-synkronisering.
+```bash
+python -m pip install -r requirements.txt
+export DEMO_USER=test
+export DEMO_PASSWORD='byt-mig'
+uvicorn server:app --reload
+```
+
+SQLite används lokalt utan `DATABASE_URL`. S3/Bucketeer krävs för att bilder ska överleva omstarter på Heroku.
