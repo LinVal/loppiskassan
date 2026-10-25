@@ -1,19 +1,26 @@
 """Loppiskassan v2: demonstrator, NOT production-ready. HTTPS at reverse proxy."""
-import os, uuid, secrets, datetime, pathlib, hmac, base64
+import os, uuid, secrets, datetime, pathlib, hmac, base64, json, logging
 from fastapi import FastAPI, HTTPException, UploadFile, File, Header, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, text
 from io import BytesIO
+from PIL import Image, ImageOps
+import httpx
 import boto3
 from botocore.exceptions import ClientError
 import qrcode
 
 ROOT=pathlib.Path(__file__).parent
 UPLOAD=ROOT/'uploads'; UPLOAD.mkdir(exist_ok=True)
-S3_BUCKET=os.getenv('S3_BUCKET')
-S3=boto3.client('s3', endpoint_url=os.getenv('S3_ENDPOINT_URL') or None, region_name=os.getenv('AWS_DEFAULT_REGION','eu-north-1')) if S3_BUCKET else None
+# Bucketeer supplies these automatically. Explicit S3_* variables still work.
+S3_BUCKET=os.getenv('S3_BUCKET') or os.getenv('BUCKETEER_BUCKET_NAME')
+S3_KEY=os.getenv('AWS_ACCESS_KEY_ID') or os.getenv('BUCKETEER_AWS_ACCESS_KEY_ID')
+S3_SECRET=os.getenv('AWS_SECRET_ACCESS_KEY') or os.getenv('BUCKETEER_AWS_SECRET_ACCESS_KEY')
+S3_REGION=os.getenv('AWS_DEFAULT_REGION') or os.getenv('BUCKETEER_AWS_REGION') or 'us-east-1'
+S3=boto3.client('s3', endpoint_url=os.getenv('S3_ENDPOINT_URL') or None,
+    region_name=S3_REGION, aws_access_key_id=S3_KEY, aws_secret_access_key=S3_SECRET) if S3_BUCKET else None
 DATABASE_URL=os.getenv('DATABASE_URL',f'sqlite:///{ROOT / "demo.db"}')
 if DATABASE_URL.startswith('postgres://'): DATABASE_URL='postgresql+psycopg://'+DATABASE_URL[len('postgres://'):]
 elif DATABASE_URL.startswith('postgresql://'): DATABASE_URL='postgresql+psycopg://'+DATABASE_URL[len('postgresql://'):]
@@ -35,17 +42,7 @@ async def demo_access(request:Request, call_next):
         scheme, encoded=auth.split(' ',1)
         raw=base64.b64decode(encoded,validate=True).decode('utf-8')
         given_user,given_password=raw.split(':',1)
-        valid = (
-    scheme.lower() == 'basic'
-    and hmac.compare_digest(
-        given_user.encode('utf-8'),
-        user.encode('utf-8')
-    )
-    and hmac.compare_digest(
-        given_password.encode('utf-8'),
-        password.encode('utf-8')
-    )
-)
+        valid=scheme.lower()=='basic' and hmac.compare_digest(given_user.encode('utf-8'),user.encode('utf-8')) and hmac.compare_digest(given_password.encode('utf-8'),password.encode('utf-8'))
     except (ValueError,UnicodeError):
         valid=False
     if not valid:
@@ -141,7 +138,86 @@ def get_photo(sid:str,pid:str):
         except ClientError:
             raise HTTPException(404,'Bild saknas')
         return StreamingResponse(obj['Body'].iter_chunks(),media_type=obj.get('ContentType','application/octet-stream'),headers={'Cache-Control':'no-store'})
+    if not (UPLOAD/row['filename']).exists(): raise HTTPException(404,'Bilden har försvunnit från den tillfälliga disken')
     return FileResponse(UPLOAD/row['filename'],headers={'Cache-Control':'no-store'})
+
+def photo_bytes(sid: str, pid: str) -> bytes:
+    with engine.connect() as db:
+        row=db.execute(text('SELECT filename FROM photos WHERE id=:id AND session_id=:s'), {'id':pid,'s':sid}).mappings().first()
+    if not row: raise HTTPException(404,'Bild saknas')
+    if S3:
+        try:
+            return S3.get_object(Bucket=S3_BUCKET, Key='photos/'+row['filename'])['Body'].read(12_000_001)
+        except ClientError:
+            raise HTTPException(404,'Bilden finns inte i Bucketeer')
+    path=UPLOAD/row['filename']
+    if not path.exists(): raise HTTPException(404,'Bilden har försvunnit vid omstart; aktivera Bucketeer')
+    return path.read_bytes()
+
+@app.post('/api/sessions/{sid}/photos/{pid}/analyze')
+async def analyze_photo(sid: str, pid: str):
+    """AI suggestions only. Never saves a sale or marks an item as verified."""
+    key=os.getenv('OPENAI_API_KEY')
+    if not key: raise HTTPException(503,'Sätt OPENAI_API_KEY i Heroku Config Vars för AI-avläsning')
+    with engine.connect() as db:
+        session=session_row(db,sid)
+    if not session or session['status']!='open': raise HTTPException(409,'Starta ett aktivt serverköp')
+    raw=photo_bytes(sid,pid)
+    if len(raw)>12_000_000: raise HTTPException(413,'Bilden är för stor')
+    try:
+        im=Image.open(BytesIO(raw))
+        im=ImageOps.exif_transpose(im).convert('RGB')
+        im.thumbnail((2200,2200))
+        out=BytesIO(); im.save(out,format='JPEG',quality=86)
+        encoded=base64.b64encode(out.getvalue()).decode('ascii')
+    except Exception:
+        raise HTTPException(415,'AI-avläsning stöder JPEG och PNG. Konvertera HEIC till JPEG.')
+    instructions=('Du granskar ett A4-ark med handskrivna prislappar från en svensk loppis. '
+      'Identifiera VARJE separat fysisk prislapp, inklusive små och överlappande lappar. '
+      'För varje lapp: inringat säljnummer (1-4 siffror), pris i hela kronor, eventuell storlek/märke. '
+      'Gissa ALDRIG oläsliga siffror: använd tom sträng för säljare och 0 för okänt pris. '
+      'Ange uncertain=true vid minsta tvekan. Returnera endast JSON-objekt med nycklarna '
+      'items (array) och note (kort svensk kommentar). Varje item: '
+      'seller (string), price (integer), desc (string), uncertain (boolean), '
+      'x,y,w,h (nummer i procent 0-100, ungefärlig rektangel kring lappen). '
+      'En rad per fysisk lapp, läs i ordning uppifrån och ned. '
+      'Alla förslag måste kontrolleras mot originalbilden innan köp registreras.')
+    payload={'model':os.getenv('OPENAI_MODEL','gpt-4.1-mini'),
+      'temperature':0,'response_format':{'type':'json_object'},
+      'messages':[{'role':'system','content':instructions},
+        {'role':'user','content':[{'type':'text','text':'Läs alla lappar. Returnera JSON.'},
+          {'type':'image_url','image_url':{'url':'data:image/jpeg;base64,'+encoded,'detail':'high'}}]}],
+      'max_tokens':4000}
+    try:
+        async with httpx.AsyncClient(timeout=110) as client:
+            resp=await client.post('https://api.openai.com/v1/chat/completions',
+                headers={'Authorization':'Bearer '+key},json=payload)
+        if resp.status_code!=200:
+            logging.warning('AI API returned status %s',resp.status_code)
+            raise HTTPException(502,'AI-tjänsten kunde inte läsa bilden (HTTP '+str(resp.status_code)+'). Kontrollera API-nyckel och saldo.')
+        result=json.loads(resp.json()['choices'][0]['message']['content'])
+    except HTTPException: raise
+    except (httpx.HTTPError, ValueError, KeyError, IndexError) as exc:
+        logging.warning('AI analysis failed: %s',type(exc).__name__)
+        raise HTTPException(502,'AI-avläsningen misslyckades. Försök igen eller mata in manuellt.')
+    if not isinstance(result,dict) or not isinstance(result.get('items'),list):
+        raise HTTPException(502,'AI gav ett oväntat resultat')
+    cleaned=[]
+    for i,r in enumerate(result['items'][:100],1):
+        if not isinstance(r,dict): continue
+        seller=str(r.get('seller') or '').strip()
+        if not seller.isascii() or not seller.isdigit() or len(seller)>4: seller=''
+        try: price=int(r.get('price') or 0)
+        except (ValueError,TypeError): price=0
+        if not 0<price<=1_000_000: price=0
+        def coord(k,default):
+            try:return max(0,min(100,float(r.get(k,default))))
+            except (TypeError,ValueError):return default
+        cleaned.append({'id':i,'seller':seller,'price':price,'desc':str(r.get('desc') or '')[:200],
+          'uncertain':bool(r.get('uncertain',True)) or not seller or not price,
+          'x':coord('x',0),'y':coord('y',0),'w':coord('w',0),'h':coord('h',0)})
+    return {'items':cleaned,'count':len(cleaned),'note':str(result.get('note') or '')[:500],
+       'warning':'AI kan missa lappar eller läsa fel. Kontrollera ALLA lappar mot fotot innan försäljning.'}
 
 @app.post('/api/sessions/{sid}/sale')
 def save_sale(sid:str,payload:Sale):
