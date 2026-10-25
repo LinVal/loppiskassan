@@ -1,0 +1,11 @@
+{
+  "name": "Loppiskassan – testmiljö",
+  "description": "Prototyp: mobilfoto via QR till serverkopplad kassa. Ej produktionsklar.",
+  "stack": "heroku-24",
+  "env": {
+    "DEMO_USER": {"description": "Användarnamn för testmiljön", "required": true},
+    "DEMO_PASSWORD": {"description": "Långt slumpmässigt lösenord för testmiljön", "required": true},
+    "PUBLIC_BASE_URL": {"description": "https://DIN-APP.herokuapp.com (ange efter att appen skapats)", "required": false}
+  },
+  "formation": {"web": {"quantity": 1, "size": "basic"}}
+}
