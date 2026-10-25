@@ -230,9 +230,12 @@ def save_sale(sid:str,payload:Sale):
         if existing: return {'sale_id':existing['id'],'total':existing['total'],'already_saved':True}
         if s['status']!='open': raise HTTPException(409,'Köp är stängt')
         sale_id=str(uuid.uuid4()); total=sum(x.price for x in payload.items)
-        db.execute(text('INSERT INTO sales VALUES (:id,:s,:r,:t,:m,:p,:c)'),dict(id=sale_id,s=sid,r=s['register_no'],t=total,m=payload.method,p=payload.recipient,c=iso(now())))
+        from v5_routes import event_for_sale, commission_for_seller
+        event_id=event_for_sale(db)
+        db.execute(text('INSERT INTO sales (id,session_id,register_no,total,method,recipient,created_at,event_id) VALUES (:id,:s,:r,:t,:m,:p,:c,:e)'),dict(id=sale_id,s=sid,r=s['register_no'],t=total,m=payload.method,p=payload.recipient,c=iso(now()),e=event_id))
         for x in payload.items:
-            db.execute(text('INSERT INTO sale_items VALUES (:id,:s,:seller,:d,:p)'),dict(id=str(uuid.uuid4()),s=sale_id,seller=x.seller,d=x.desc,p=x.price))
+            rate=commission_for_seller(db,x.seller)
+            db.execute(text('INSERT INTO sale_items (id,sale_id,seller,description,price,commission_bps) VALUES (:id,:s,:seller,:d,:p,:bps)'),dict(id=str(uuid.uuid4()),s=sale_id,seller=x.seller,d=x.desc,p=x.price,bps=rate))
         db.execute(text("UPDATE sessions SET status='closed' WHERE id=:s"),{'s':sid})
     return {'sale_id':sale_id,'total':total,'already_saved':False}
 
@@ -253,4 +256,7 @@ def mobile(): return FileResponse(ROOT/'static'/'mobile.html')
 from v4_routes import router as v4_router, install as install_v4
 install_v4(engine)
 app.include_router(v4_router)
+from v5_routes import router as v5_router, install as install_v5
+install_v5(engine)
+app.include_router(v5_router)
 app.mount('/',StaticFiles(directory=ROOT/'static',html=True),name='frontend')
