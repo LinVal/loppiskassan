@@ -1,7 +1,7 @@
 """Executable business rules for sales, settlement and payouts."""
 import pytest
 from conftest import sale
-from v5_routes import payout_split, rate_bps
+from events import payout_split, rate_bps
 from fastapi import HTTPException
 
 @pytest.mark.parametrize('gross,bps,fee,due', [

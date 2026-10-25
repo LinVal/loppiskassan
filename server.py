@@ -214,7 +214,7 @@ def save_sale(sid:str,payload:Sale):
         if existing: return {'sale_id':existing['id'],'total':existing['total'],'already_saved':True}
         if s['status']!='open': raise HTTPException(409,'Köp är stängt')
         sale_id=str(uuid.uuid4()); total=sum(x.price for x in payload.items)
-        from v5_routes import event_for_sale, commission_for_seller
+        from events import event_for_sale, commission_for_seller
         event_id=event_for_sale(db)
         db.execute(text('INSERT INTO sales (id,session_id,register_no,total,method,recipient,created_at,event_id) VALUES (:id,:s,:r,:t,:m,:p,:c,:e)'),dict(id=sale_id,s=sid,r=s['register_no'],t=total,m=payload.method,p=payload.recipient,c=iso(now()),e=event_id))
         for x in payload.items:
@@ -237,12 +237,12 @@ def summary():
 
 @app.get('/mobile')
 def mobile(): return FileResponse(ROOT/'static'/'mobile.html')
-from v4_routes import router as v4_router, install as install_v4
+from sellers import router as v4_router, install as install_v4
 install_v4(engine)
 app.include_router(v4_router)
 from staff_auth import router as staff_router
 app.include_router(staff_router)
-from v5_routes import router as v5_router, install as install_v5
+from events import router as v5_router, install as install_v5
 install_v5(engine)
 app.include_router(v5_router)
 app.mount('/',StaticFiles(directory=ROOT/'static',html=True),name='frontend')

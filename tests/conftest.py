@@ -13,14 +13,14 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv('DEMO_PASSWORD', 'lösenord-åäö-12345')
     monkeypatch.delenv('S3_BUCKET', raising=False)
     monkeypatch.delenv('BUCKETEER_BUCKET_NAME', raising=False)
-    for name in ('server', 'v4_routes', 'v5_routes', 'staff_auth'):
+    for name in ('server', 'sellers', 'events', 'staff_auth'):
         sys.modules.pop(name, None)
     app = importlib.import_module('server').app
     with TestClient(app) as c:
         credentials=base64.b64encode('testare:lösenord-åäö-12345'.encode()).decode()
         c.headers.update({'Authorization': 'Basic '+credentials})
         yield c
-    for name in ('server', 'v4_routes', 'v5_routes', 'staff_auth'):
+    for name in ('server', 'sellers', 'events', 'staff_auth'):
         sys.modules.pop(name, None)
 
 @pytest.fixture

@@ -34,7 +34,7 @@ def test_ten_registers_thousand_sales_postgres(monkeypatch):
     monkeypatch.setenv('DEMO_PASSWORD', 'temporary-test-password-123')
     monkeypatch.delenv('BUCKETEER_BUCKET_NAME', raising=False)
     monkeypatch.delenv('S3_BUCKET', raising=False)
-    for name in ('server', 'v4_routes', 'v5_routes', 'staff_auth'):
+    for name in ('server', 'sellers', 'events', 'staff_auth'):
         sys.modules.pop(name, None)
 
     server = importlib.import_module('server')
@@ -111,5 +111,5 @@ def test_ten_registers_thousand_sales_postgres(monkeypatch):
                 assert db.execute(text('SELECT COUNT(*) FROM sales WHERE session_id=:s'), {'s': session_id}).scalar_one() == 1
     finally:
         server.engine.dispose()
-        for name in ('server', 'v4_routes', 'v5_routes', 'staff_auth'):
+        for name in ('server', 'sellers', 'events', 'staff_auth'):
             sys.modules.pop(name, None)
