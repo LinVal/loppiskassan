@@ -52,3 +52,6 @@ Mer information om affärsregler finns i `REGLER_OCH_TESTER.md`.
 Kassan sparar påbörjat köp och sessions-ID i webbläsarens `localStorage`. Vid omladdning kontrollerar den servern innan den återupptar köpet. Om köpet redan är registrerat rensas utkastet. Vid osäker nätverksstatus behålls utkastet; starta inte ett nytt köp förrän status har kontrollerats.
 
 Detta skyddar mot vanliga omladdningar och upprepade anrop inom samma session, men är **inte fullständigt offlinestöd**. Lokal lagring är knuten till en viss webbläsare och kan raderas. Verifiera manuellt med två flikar, förlorad uppkoppling och flera kassor innan verklig drift.
+
+## Gränssnittsdesign
+Gemensamma designregler i `static/design-system.css` används av kassa, admin, säljare, evenemang och personal. Det är en första stylinguppdatering, inte en fullständig UX- eller WCAG-revision. Kontrollera gränssnitten visuellt före driftsättning.
