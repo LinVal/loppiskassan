@@ -55,3 +55,14 @@ Detta skyddar mot vanliga omladdningar och upprepade anrop inom samma session, m
 
 ## Gränssnittsdesign
 Gemensamma designregler i `static/design-system.css` används av kassa, admin, säljare, evenemang och personal. Det är en första stylinguppdatering, inte en fullständig UX- eller WCAG-revision. Kontrollera gränssnitten visuellt före driftsättning.
+
+## Kassaflöde
+
+Kassan visar nu steg 1–4 (skanna, kontrollera, betala, klart), tydligare
+felmeddelanden och en separat sammanfattning innan köpet skickas till servern.
+Efter lyckad registrering visas en bekräftelse med möjlighet att starta nästa
+kund. Om servern inte svarar behålls sessions-ID:t så att samma köp kan
+försökas igen. Start av serverköp rensar de förifyllda demo-varorna.
+
+**Viktigt:** Betalningen verifieras fortfarande manuellt. Ingen fullständig
+offlineförsäljning finns. Testa visuellt och funktionellt innan användning.

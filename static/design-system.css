@@ -12,3 +12,26 @@ a{color:var(--accent)}table{border-collapse:collapse;width:100%}th{text-align:le
 header{background:#fff!important;color:var(--text)!important;border-bottom:1px solid #d9d9df}header a{color:var(--accent)!important}
 @media(max-width:760px){main{padding:14px!important}.card{padding:16px!important}table{display:block;overflow-x:auto;-webkit-overflow-scrolling:touch}th,td{white-space:nowrap}header{padding:14px!important}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+/* Kassans stegvisa arbetsflöde */
+.checkout-steps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:18px 0 10px}
+.step{display:flex;gap:9px;align-items:center;padding:12px;background:#fff;border:1px solid #dddde3;border-radius:12px;font-weight:650;color:#686870}
+.step b{display:inline-grid;place-items:center;min-width:28px;height:28px;border-radius:50%;background:#e8e8ed;color:#404045}
+.step.active{border-color:#0071e3;background:#eef6ff;color:#004f9e}
+.step.active b{background:#0071e3;color:white}
+.step.complete{border-color:#aed9bf;color:#176c43;background:#f1faf4}
+.step.complete b{background:#176c43;color:white}
+.checkout-feedback{background:#fff;border:1px solid #d9d9df;border-left:4px solid #0071e3;border-radius:10px;padding:12px 15px;margin:10px 0 16px;min-height:48px}
+.checkout-feedback.warning{border-left-color:#b45f06;background:#fff9ec}
+.checkout-feedback.success{border-left-color:#176c43;background:#effaf3}
+#paymentSection{scroll-margin-top:18px}
+#paymentSection .footer-actions{display:flex}
+#finish{width:100%;font-size:1.1rem;padding:15px 20px}
+#total{font-variant-numeric:tabular-nums;font-size:clamp(1.6rem,3vw,2.1rem)}
+#rows tr.flag{box-shadow:inset 4px 0 #b45f06}
+#rows input{min-width:68px}
+.checkout-dialog{width:min(95vw,480px);max-height:90vh;overflow:auto}
+.checkout-dialog .review-total{font-size:2rem;font-weight:800;font-variant-numeric:tabular-nums;margin:8px 0 14px}
+.checkout-dialog .modal-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
+.checkout-dialog .modal-actions button{flex:1;min-width:145px}
+@media(max-width:600px){.checkout-steps{grid-template-columns:repeat(2,minmax(0,1fr))}.step{font-size:.9rem;padding:9px}.checkout-dialog{padding:18px}}
