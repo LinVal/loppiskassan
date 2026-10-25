@@ -106,8 +106,10 @@ def add_adjustment(a:Adjustment):
     import uuid
     if a.amount==0:raise HTTPException(422,'Ändringen får inte vara noll')
     with engine.begin() as db:
-        item=db.execute(text('SELECT id,sale_id,seller,price FROM sale_items WHERE id=:id'),{'id':a.sale_item_id}).mappings().first()
+        item=db.execute(text('SELECT si.id,si.sale_id,si.seller,si.price,sa.event_id FROM sale_items si JOIN sales sa ON sa.id=si.sale_id WHERE si.id=:id'),{'id':a.sale_item_id}).mappings().first()
         if not item:raise HTTPException(404,'Varurad saknas')
+        from v5_routes import require_event_open
+        require_event_open(db,item['event_id'])
         previous=db.execute(text('SELECT COALESCE(SUM(amount),0) FROM adjustments WHERE sale_item_id=:id'),{'id':a.sale_item_id}).scalar_one()
         if item['price']+previous+a.amount<0:raise HTTPException(422,'Radens netto får inte bli negativt')
         aid=str(uuid.uuid4())

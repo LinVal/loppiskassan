@@ -27,27 +27,9 @@ elif DATABASE_URL.startswith('postgresql://'): DATABASE_URL='postgresql+psycopg:
 engine=create_engine(DATABASE_URL,connect_args={'check_same_thread':False} if DATABASE_URL.startswith('sqlite') else {},pool_pre_ping=True)
 app=FastAPI(title='Loppiskassan – Heroku test')
 
-@app.middleware('http')
-async def demo_access(request:Request, call_next):
-    # The temporary mobile page and one-time upload link are intentionally token-based.
-    path=request.url.path
-    if path == '/health' or path == '/mobile' or path == '/seller' or path.startswith('/api/portal/') or path.startswith('/api/mobile/'):
-        return await call_next(request)
-    user=os.getenv('DEMO_USER')
-    password=os.getenv('DEMO_PASSWORD')
-    if not user or not password:
-        return Response('DEMO_USER and DEMO_PASSWORD must be configured', status_code=503)
-    auth=request.headers.get('authorization','')
-    try:
-        scheme, encoded=auth.split(' ',1)
-        raw=base64.b64decode(encoded,validate=True).decode('utf-8')
-        given_user,given_password=raw.split(':',1)
-        valid=scheme.lower()=='basic' and hmac.compare_digest(given_user.encode('utf-8'),user.encode('utf-8')) and hmac.compare_digest(given_password.encode('utf-8'),password.encode('utf-8'))
-    except (ValueError,UnicodeError):
-        valid=False
-    if not valid:
-        return Response('Authentication required',status_code=401,headers={'WWW-Authenticate':'Basic realm="Loppiskassan test"'})
-    return await call_next(request)
+from staff_auth import install_staff, staff_middleware
+install_staff(engine)
+app.middleware('http')(staff_middleware)
 
 @app.get('/health')
 def health(): return {'ok':True}
@@ -224,6 +206,8 @@ async def analyze_photo(sid: str, pid: str):
 def save_sale(sid:str,payload:Sale):
     if not payload.payment_confirmed: raise HTTPException(400,'Betalning måste bekräftas manuellt')
     with engine.begin() as db:
+        if engine.dialect.name=='postgresql':
+            db.execute(text('SELECT id FROM sessions WHERE id=:id FOR UPDATE'),{'id':sid}).first()
         s=session_row(db,sid)
         if not s: raise HTTPException(404,'Köp saknas')
         existing=db.execute(text('SELECT id,total FROM sales WHERE session_id=:s'),{'s':sid}).mappings().first()
@@ -256,6 +240,8 @@ def mobile(): return FileResponse(ROOT/'static'/'mobile.html')
 from v4_routes import router as v4_router, install as install_v4
 install_v4(engine)
 app.include_router(v4_router)
+from staff_auth import router as staff_router
+app.include_router(staff_router)
 from v5_routes import router as v5_router, install as install_v5
 install_v5(engine)
 app.include_router(v5_router)
