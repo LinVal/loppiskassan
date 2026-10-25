@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Lokala databaser
+*.db
+*.sqlite3
+
+# Miljövariabler och hemligheter
+.env
+.env.*
+
+# Virtuella miljöer
+.venv/
+venv/
+
+# Lokala uppladdningar
+uploads/
