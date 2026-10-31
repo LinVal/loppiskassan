@@ -86,3 +86,24 @@ Alla varupriser måste vara positiva hela kronor delbara med fem. Regeln
 valideras i kassans gränssnitt och i serverns Pydantic-modell. AI-priser
 som inte följer regeln markeras för korrigering, aldrig automatisk avrundning.
 Befintliga försäljningar ändras inte.
+
+## Prisfeedback i kassan
+
+Priser valideras direkt medan kassapersonalen skriver. Ogiltiga prisfält
+markeras med röd ram och ett tydligt meddelande. Köpknappen inaktiveras
+tills alla priser är positiva femtal. Ingen automatisk avrundning görs.
+Kassan öppnar nu utan förifyllda exempelvaror och med tom bildyta.
+Serverns befintliga prisvalidering finns kvar som yttersta skydd.
+
+## Exempelköp på kassans startsida
+
+När ingen aktiv serverförsäljning finns visas originalets exempelbild och 19 exempelvaror. Klick på Starta serverköp tömmer bilden och varulistan. Nästa kund börjar också tomt. Vid omladdning av aktiv försäljning prioriteras sparat utkast. Exempelköpet är inte en riktig serverförsäljning.
+
+### Nätverksavbrott i kassan
+
+Kassan visar serverns anslutningsstatus (kontrolleras mot `/health` ungefär var tionde sekund).
+Påbörjade serverköp lagras som utkast i webbläsarens `localStorage` och kan återställas
+vid siduppdatering. Vid osäkert svar på sparat köp kontrolleras sessionsstatus innan
+samma sessions-ID skickas på nytt. Serverns idempotenta registrering förhindrar
+att samma session ger två försäljningar. Detta är **inte** fullständigt offlinestöd:
+köp kan inte registreras på servern utan nätverksanslutning.

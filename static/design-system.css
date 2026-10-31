@@ -45,3 +45,8 @@ header{background:#fff!important;color:var(--text)!important;border-bottom:1px s
 tr[hidden]{display:none!important}
 #sellerStatus:not(:empty){padding:10px 12px;background:#f0f6ff;border-radius:10px}
 @media(max-width:760px){.seller-summary{padding:16px}#sellerSearch{width:100%}}
+
+/* Immediate price validation in checkout */
+#rows input.invalid-price,#rows input[aria-invalid="true"]{border:2px solid #b42318!important;background:#fff3f2!important;box-shadow:0 0 0 2px #ffe1df}
+.price-error{padding:12px 14px;margin:8px 0 12px;background:#fff3f2;color:#8f1d14;border:1px solid #f2b8b3;border-radius:10px;font-weight:650}
+.price-error[hidden]{display:none}
