@@ -107,3 +107,6 @@ vid siduppdatering. Vid osäkert svar på sparat köp kontrolleras sessionsstatu
 samma sessions-ID skickas på nytt. Serverns idempotenta registrering förhindrar
 att samma session ger två försäljningar. Detta är **inte** fullständigt offlinestöd:
 köp kan inte registreras på servern utan nätverksanslutning.
+
+## Betalningsflöde 2.0
+Se **KASSAFLODEN_OCH_KVALITETSREGLER.md** för fullständig processbeskrivning, kvalitetsregler, felhantering, ansvar och acceptanstester. Ett betalsätt per köp: Swish, Kort eller Kontant. Kontantbelopp valideras i både kassa och API; betalningar verifieras fortfarande manuellt.

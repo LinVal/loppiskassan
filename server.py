@@ -65,6 +65,14 @@ class Sale(BaseModel):
     method: str=Field(max_length=40)
     recipient: str=Field(min_length=1,max_length=150)
     payment_confirmed: bool
+    cash_received: int | None = Field(default=None, ge=0, strict=True)
+
+    @field_validator("method")
+    @classmethod
+    def valid_method(cls, value: str) -> str:
+        if value not in ("Swish", "Kontant", "Kort"):
+            raise ValueError("Välj Swish, Kontant eller Kort")
+        return value
 
 @app.post('/api/sessions')
 def new_session(payload:NewSession):
@@ -225,6 +233,8 @@ async def analyze_photo(sid: str, pid: str):
 @app.post('/api/sessions/{sid}/sale')
 def save_sale(sid:str,payload:Sale):
     if not payload.payment_confirmed: raise HTTPException(400,'Betalning måste bekräftas manuellt')
+    if payload.method == 'Kontant' and (payload.cash_received is None or payload.cash_received < sum(x.price for x in payload.items)):
+        raise HTTPException(400, 'Mottaget kontantbelopp måste täcka totalsumman')
     with engine.begin() as db:
         if engine.dialect.name=='postgresql':
             db.execute(text('SELECT id FROM sessions WHERE id=:id FOR UPDATE'),{'id':sid}).first()
