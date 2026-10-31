@@ -35,12 +35,6 @@ Behåll den befintliga Heroku-appen och dess tillägg för PostgreSQL och Bucket
 
 Startkommandot finns i `Procfile`. Applikationen importerar nu `sellers.py` och `events.py`. **De tidigare filerna `v4_routes.py` och `v5_routes.py` ska tas bort från GitHub i samma commit som de nya filerna läggs till.**
 
-## Bakåtkompatibilitet
-
-De befintliga API-adresserna `/api/v4/...` och `/api/v5/...` är avsiktligt oförändrade så att webbläsargränssnitt och integrationer fortsätter fungera. Det är bara filnamnen i Python-koden som förenklats. Befintliga databastabeller och data ändras inte av namnbytet.
-
-## Tester och begränsningar
-
 GitHub Actions kör regressionstester och PostgreSQL-tester. Tester av återförsök simulerar förlorade HTTP-svar, inte faktiska nätverksavbrott. Ett nytt sessions-ID efter ett avbrott kan fortfarande skapa en dubblett. Kör testerna och kontrollera grönt resultat före Heroku-deploy.
 
 Detta är fortfarande ett testsystem. Kontrollera behörigheter på API-nivå, betalningsflöden, säkerhetskopior och personuppgiftshantering före verklig drift.
@@ -111,10 +105,12 @@ köp kan inte registreras på servern utan nätverksanslutning.
 ## Betalningsflöde 2.0
 Se **KASSAFLODEN_OCH_KVALITETSREGLER.md** för fullständig processbeskrivning, kvalitetsregler, felhantering, ansvar och acceptanstester. Ett betalsätt per köp: Swish, Kort eller Kontant. Kontantbelopp valideras i både kassa och API; betalningar verifieras fortfarande manuellt.
 
-## Kassaflöde 2.1 – evenemangstilldelningar och bildunderlag
+### Importera säljare och kopiera återkommande medarbetare
 
-Läs **KASSAFLODE_21_SYSTEMHANDBOK.md** för arbetsflöden, kvalitetsregler,
-API och begränsningar. Nya evenemang skapas som utkast och måste startas
-manuellt efter att namngivna säljnummer tilldelats. Befintliga öppna
-evenemang påverkas inte automatiskt av denna ändring; tilldela deras
-säljnummer innan ytterligare försäljning registreras.
+Under **Loppistillfällen** kan ett utkast fyllas med en UTF-8-CSV med rubrikerna `nummer;namn;typ` (semikolon, komma eller tab som avgränsare). `typ` är valfri: `medarbetare` eller `extern`. Excel-filer exporteras först till CSV. Det går även att kopiera medarbetare, externa eller alla från ett tidigare evenemang. Import och kopiering stoppar vid nummerkonflikt och ändrar aldrig en pågående loppis. Se `KASSAFLODE_21_SYSTEMHANDBOK.md` för detaljer och begränsningar.
+
+## Permanenta säljaridentiteter
+Varje tilldelning har `identity_id`. Vid kopiering av säljare behålls samma identitet; nya CSV-rader får nya identiteter om inte `person_id` anges. Namn används aldrig automatiskt för att slå ihop personer. `GET /api/v5/seller-identities` listar ID för återanvändning. Befintliga `/api/v4/` och `/api/v5/`-anrop används tills en separat, testad API-migrering genomförs.
+
+### Sökbart personregister
+Administrationen har nu sökning på permanenta säljaridentiteter, historik per evenemang och möjlighet att återanvända identitet vid ny tilldelning. Se `PERMANENTA_SALJARIDENTITETER.md`.

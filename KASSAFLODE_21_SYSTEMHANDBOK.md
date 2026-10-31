@@ -69,3 +69,31 @@
 - `GET /api/v4/sales` – köphistorik inklusive `photos`.
 
 Automatiska tester täcker bland annat utkast, startspärr, lediga nummer, förbud mot ägarbyte efter försäljning, betalning och idempotens. Fullständig browsergenomgång och Heroku-test återstår.
+
+## Import och återanvändning av säljare
+
+**Syfte:** Förbereda en ny loppis utan att registrera varje återkommande säljare manuellt.
+
+**CSV-import:** Gå till *Loppistillfällen*, skapa eller välj ett **utkast** och välj CSV-filen. Filen ska vara UTF-8 och innehålla rubrikerna `nummer;namn;typ`. `typ` är valfri och får vara `medarbetare` eller `extern` (alternativt `staff`/`external`). Om typ saknas används extern. Excel-arbetsböcker (.xlsx) behöver först exporteras till CSV. Nummer 1–250 är möjliga; lediga nummer får sakna tilldelning.
+
+Exempel:
+
+```csv
+nummer;namn;typ
+1;Anna Andersson;medarbetare
+78;Erik Eriksson;extern
+```
+
+**Kopiering:** Välj det nya utkastet som mål, välj tidigare evenemang som källa och välj *Medarbetare*, *Externa* eller *Alla*. Kopierade nummer och namn är ett förslag för det nya evenemanget, inte en permanent reservation. Administratören kan frigöra eller ändra dem före start.
+
+**Kvalitetsregler:**
+- Import och kopiering är bara tillåtna i utkast.
+- Tomma namn, nummer utanför 1–250, dubbla nummer i samma fil och okänd säljartyp stoppas.
+- Befintliga tilldelningar skrivs inte över. Vid konflikt avbryts hela importen/kopieringen utan delvis genomförda tilldelningar.
+- Ändringar i tilldelningar loggas med aktör och tidpunkt.
+- Saknas säljnumret i grundregistret skapas det automatiskt. Finns det redan bevaras grundregistrets namn och provision; ett inaktivt nummer blockerar importen. Detta innebär att grundregistrets namn kan skilja sig från namnet i ett evenemang och behöver granskas av administratör.
+- Kopiering eller import startar aldrig loppisen automatiskt. Startkontrollen måste fortfarande passera.
+
+**Begränsning:** Detta är CSV-import, inte direktimport av .xlsx. Systemet har ännu ingen separat global personidentitet för återkommande säljare; återanvändning sker via säljnummer och evenemangstilldelningar. Det är viktigt vid byte av nummer och framtida vidareutveckling.
+
+**Testfall:** CSV med medarbetare och externa, kopiering till nytt utkast, dubbla nummer, upptaget nummer, ogiltigt namn/nummer/typ samt import efter start.
