@@ -206,6 +206,30 @@ def event_sellers(eid:str):
         rows=db.execute(text('SELECT number,name,seller_type,identity_id FROM event_sellers WHERE event_id=:e ORDER BY LENGTH(number),number'),{'e':eid}).mappings().all()
     return {'status':event[0],'assigned':[dict(x) for x in rows],'available':250-len(rows)}
 
+def readiness_summary(status, assigned):
+    """One shared readiness policy for the admin UI and event start."""
+    issues=[]
+    if not assigned: issues.append('Tilldela minst en namngiven säljare.')
+    missing=[str(r['number']) for r in assigned if not str(r['name'] or '').strip()]
+    if missing: issues.append('Namn saknas för nummer: '+', '.join(missing))
+    invalid=[str(r['number']) for r in assigned if not str(r['number']).isdigit() or not 1<=int(r['number'])<=250]
+    if invalid: issues.append('Ogiltiga nummer: '+', '.join(invalid))
+    identities=[r['identity_id'] for r in assigned if r['identity_id']]
+    if len(identities)!=len(set(identities)):
+        issues.append('En person har tilldelats flera nummer i samma evenemang.')
+    return {'status':status,'ready':status=='draft' and not issues,'issues':issues,
+            'assigned':len(assigned),'staff':sum(r['seller_type']=='staff' for r in assigned),
+            'external':sum(r['seller_type']=='external' for r in assigned),
+            'available':250-len(assigned)}
+
+@router.get('/api/v5/events/{eid}/readiness')
+def event_readiness(eid:str):
+    with engine.connect() as db:
+        event=db.execute(text('SELECT status FROM flea_events WHERE id=:e'),{'e':eid}).first()
+        if not event:raise HTTPException(404,'Loppis saknas')
+        rows=db.execute(text('SELECT number,name,seller_type,identity_id FROM event_sellers WHERE event_id=:e'),{'e':eid}).mappings().all()
+    return readiness_summary(event[0],rows)
+
 @router.put('/api/v5/events/{eid}/sellers')
 def assign_event_seller(eid:str,payload:AssignmentIn):
     name=payload.name.strip()
@@ -219,6 +243,9 @@ def assign_event_seller(eid:str,payload:AssignmentIn):
         # A number that has been sold under must never be reassigned.
         used=db.execute(text('SELECT 1 FROM sale_items si JOIN sales sa ON sa.id=si.sale_id WHERE sa.event_id=:e AND si.seller=:n LIMIT 1'),{'e':eid,'n':number}).first()
         if used and previous and (previous[0]!=name or (payload.identity_id and payload.identity_id!=previous[1])):raise HTTPException(409,'Numret har försäljning och får inte byta ägare')
+        if payload.identity_id:
+            duplicate=db.execute(text('SELECT number FROM event_sellers WHERE event_id=:e AND identity_id=:sid AND number<>:n'),{'e':eid,'sid':payload.identity_id,'n':number}).first()
+            if duplicate:raise HTTPException(409,f'Personen är redan tilldelad nummer {duplicate[0]} i detta evenemang')
         if previous:
             sid=resolve_identity(db,name,payload.identity_id) if payload.identity_id else previous[1]
             db.execute(text('UPDATE event_sellers SET name=:name,seller_type=:type,identity_id=:sid WHERE event_id=:e AND number=:n'),{'name':name,'type':payload.seller_type,'sid':sid,'e':eid,'n':number})
@@ -249,8 +276,8 @@ def start_event(eid:str):
         if event[0]!='draft':raise HTTPException(409,'Bara utkast kan startas')
         if db.execute(text("SELECT 1 FROM flea_events WHERE status='open'")).first():raise HTTPException(409,'En annan loppis pågår')
         rows=db.execute(text('SELECT number,name FROM event_sellers WHERE event_id=:e'),{'e':eid}).all()
-        if not rows:raise HTTPException(409,'Tilldela minst en namngiven säljare före start')
-        if any(not name.strip() for _,name in rows):raise HTTPException(409,'Alla tilldelade säljnummer måste ha namn')
+        summary=readiness_summary('draft',[dict(number=n,name=name,seller_type=typ,identity_id=sid) for n,name,typ,sid in db.execute(text('SELECT number,name,seller_type,identity_id FROM event_sellers WHERE event_id=:e'),{'e':eid}).all()])
+        if not summary['ready']:raise HTTPException(409,' '.join(summary['issues']))
         db.execute(text("UPDATE flea_events SET status='open' WHERE id=:e"),{'e':eid})
     return {'id':eid,'status':'open','assigned':len(rows)}
 

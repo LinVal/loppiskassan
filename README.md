@@ -114,3 +114,6 @@ Varje tilldelning har `identity_id`. Vid kopiering av säljare behålls samma id
 
 ### Sökbart personregister
 Administrationen har nu sökning på permanenta säljaridentiteter, historik per evenemang och möjlighet att återanvända identitet vid ny tilldelning. Se `PERMANENTA_SALJARIDENTITETER.md`.
+
+## Förberedelser inför loppis
+Se `EVENTFORBEREDELSER_OCH_STARTKONTROLL.md` för administratörens arbetsflöde, startkontroll och kvalitetsregler.
