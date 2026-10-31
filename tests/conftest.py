@@ -33,7 +33,10 @@ def seller(client):
 def event(client):
     response = client.post('/api/v5/events', json={'name':'Testloppis'})
     assert response.status_code == 201, response.text
-    return response.json()['id']
+    eid=response.json()['id']
+    assert client.put(f'/api/v5/events/{eid}/sellers',json={'number':77,'name':'Testsäljare'}).status_code==200
+    assert client.post(f'/api/v5/events/{eid}/start').status_code==200
+    return eid
 
 def sale(client, seller='77', price=100, register='1', confirmed=True):
     session = client.post('/api/sessions', json={'register_no':register}).json()['session_id']

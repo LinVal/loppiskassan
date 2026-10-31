@@ -244,10 +244,11 @@ def save_sale(sid:str,payload:Sale):
         if existing: return {'sale_id':existing['id'],'total':existing['total'],'already_saved':True}
         if s['status']!='open': raise HTTPException(409,'Köp är stängt')
         sale_id=str(uuid.uuid4()); total=sum(x.price for x in payload.items)
-        from events import event_for_sale, commission_for_seller
+        from events import event_for_sale, commission_for_seller, validate_event_seller
         event_id=event_for_sale(db)
         db.execute(text('INSERT INTO sales (id,session_id,register_no,total,method,recipient,created_at,event_id) VALUES (:id,:s,:r,:t,:m,:p,:c,:e)'),dict(id=sale_id,s=sid,r=s['register_no'],t=total,m=payload.method,p=payload.recipient,c=iso(now()),e=event_id))
         for x in payload.items:
+            validate_event_seller(db,event_id,x.seller)
             rate=commission_for_seller(db,x.seller)
             db.execute(text('INSERT INTO sale_items (id,sale_id,seller,description,price,commission_bps) VALUES (:id,:s,:seller,:d,:p,:bps)'),dict(id=str(uuid.uuid4()),s=sale_id,seller=x.seller,d=x.desc,p=x.price,bps=rate))
         db.execute(text("UPDATE sessions SET status='closed' WHERE id=:s"),{'s':sid})

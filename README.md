@@ -110,3 +110,11 @@ köp kan inte registreras på servern utan nätverksanslutning.
 
 ## Betalningsflöde 2.0
 Se **KASSAFLODEN_OCH_KVALITETSREGLER.md** för fullständig processbeskrivning, kvalitetsregler, felhantering, ansvar och acceptanstester. Ett betalsätt per köp: Swish, Kort eller Kontant. Kontantbelopp valideras i både kassa och API; betalningar verifieras fortfarande manuellt.
+
+## Kassaflöde 2.1 – evenemangstilldelningar och bildunderlag
+
+Läs **KASSAFLODE_21_SYSTEMHANDBOK.md** för arbetsflöden, kvalitetsregler,
+API och begränsningar. Nya evenemang skapas som utkast och måste startas
+manuellt efter att namngivna säljnummer tilldelats. Befintliga öppna
+evenemang påverkas inte automatiskt av denna ändring; tilldela deras
+säljnummer innan ytterligare försäljning registreras.

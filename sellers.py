@@ -92,7 +92,8 @@ def sales_detail(limit:int=100,offset:int=0):
         for sale in sales:
             rows=db.execute(text('''SELECT si.id,si.seller,si.description,si.price,COALESCE((SELECT SUM(amount) FROM adjustments WHERE sale_item_id=si.id),0) AS correction FROM sale_items si WHERE sale_id=:id'''),{'id':sale['id']}).mappings().all()
             itemlist=[dict(x) for x in rows]
-            result.append({**dict(sale),'items':itemlist,'net_total':sum(x['price']+x['correction'] for x in itemlist)})
+            photos=db.execute(text('SELECT id,created_at FROM photos WHERE session_id=:sid ORDER BY created_at'),{'sid':sale['session_id']}).mappings().all()
+            result.append({**dict(sale),'items':itemlist,'photos':[{'id':r['id'],'created_at':r['created_at'],'url':f'/api/sessions/{sale["session_id"]}/photos/{r["id"]}'} for r in photos],'net_total':sum(x['price']+x['correction'] for x in itemlist)})
     return {'sales':result,'limit':limit,'offset':offset}
 
 class Adjustment(BaseModel):

@@ -21,6 +21,8 @@ def install(e):
     with engine.begin() as db:
         if engine.dialect.name=='postgresql':db.execute(text('SELECT pg_advisory_xact_lock(87420015)'))
         db.execute(text("CREATE TABLE IF NOT EXISTS flea_events (id VARCHAR(64) PRIMARY KEY, name VARCHAR(150) NOT NULL, status VARCHAR(20) NOT NULL, created_at VARCHAR(40) NOT NULL, closed_at VARCHAR(40))"))
+        db.execute(text("CREATE TABLE IF NOT EXISTS event_sellers (event_id VARCHAR(64) NOT NULL, number VARCHAR(12) NOT NULL, name VARCHAR(150) NOT NULL, seller_type VARCHAR(20) NOT NULL DEFAULT 'external', assigned_at VARCHAR(40) NOT NULL, PRIMARY KEY(event_id,number))"))
+        db.execute(text("CREATE TABLE IF NOT EXISTS event_seller_audit (id VARCHAR(64) PRIMARY KEY, event_id VARCHAR(64) NOT NULL, number VARCHAR(12) NOT NULL, old_name VARCHAR(150), new_name VARCHAR(150), actor VARCHAR(100) NOT NULL, created_at VARCHAR(40) NOT NULL)"))
         db.execute(text("CREATE TABLE IF NOT EXISTS payouts (id VARCHAR(64) PRIMARY KEY, event_id VARCHAR(64) NOT NULL, seller VARCHAR(12) NOT NULL, amount INTEGER NOT NULL, paid_at VARCHAR(40) NOT NULL, actor VARCHAR(100) NOT NULL, note VARCHAR(250) NOT NULL, UNIQUE(event_id,seller))"))
         def column(table,name,definition):
             if e.dialect.name=='postgresql':
@@ -47,12 +49,23 @@ def event_for_sale(db):
     if len(events)!=1:raise HTTPException(409,'Exakt ett aktivt loppistillfälle krävs. Skapa/öppna ett under Administration → Loppistillfällen.')
     return events[0][0]
 
+def validate_event_seller(db,event_id,number):
+    row=db.execute(text('SELECT name FROM event_sellers WHERE event_id=:e AND number=:n'),{'e':event_id,'n':str(int(number))}).first()
+    if not row:raise HTTPException(422,f'Säljnummer {number} är inte tilldelat i den aktiva loppisen')
+    return row[0]
+
 def commission_for_seller(db,number):
     row=db.execute(text('SELECT commission_bps FROM sellers WHERE number=:n AND active=1'),{'n':number}).first()
     if not row:raise HTTPException(422,f'Säljare {number} saknas eller är inaktiv')
     return row[0]
 
 class EventIn(BaseModel):name:str=Field(min_length=2,max_length=150)
+class AssignmentIn(BaseModel):
+    number:int=Field(ge=1,le=250)
+    name:str=Field(min_length=1,max_length=150)
+    seller_type:str=Field(default='external',pattern='^(staff|external)$')
+    actor:str=Field(default='Administratör',min_length=2,max_length=100)
+
 class RateIn(BaseModel):rate:float=Field(ge=0,le=100)
 class PayoutIn(BaseModel):actor:str=Field(min_length=2,max_length=100);note:str=Field(default='',max_length=250)
 
@@ -66,8 +79,62 @@ def events():
 def create_event(payload:EventIn):
     with engine.begin() as db:
         if db.execute(text("SELECT 1 FROM flea_events WHERE status='open'")).first():raise HTTPException(409,'Avsluta den aktiva loppisen innan du skapar nästa')
-        eid=str(uuid.uuid4());db.execute(text('INSERT INTO flea_events (id,name,status,created_at) VALUES (:id,:name,:status,:at)'),dict(id=eid,name=payload.name,status='open',at=stamp()))
-    return {'id':eid,'status':'open'}
+        eid=str(uuid.uuid4());db.execute(text('INSERT INTO flea_events (id,name,status,created_at) VALUES (:id,:name,:status,:at)'),dict(id=eid,name=payload.name,status='draft',at=stamp()))
+    return {'id':eid,'status':'draft'}
+
+@router.get('/api/v5/events/{eid}/sellers')
+def event_sellers(eid:str):
+    with engine.connect() as db:
+        event=db.execute(text('SELECT status FROM flea_events WHERE id=:id'),{'id':eid}).first()
+        if not event:raise HTTPException(404,'Loppis saknas')
+        rows=db.execute(text('SELECT number,name,seller_type FROM event_sellers WHERE event_id=:e ORDER BY LENGTH(number),number'),{'e':eid}).mappings().all()
+    return {'status':event[0],'assigned':[dict(x) for x in rows],'available':250-len(rows)}
+
+@router.put('/api/v5/events/{eid}/sellers')
+def assign_event_seller(eid:str,payload:AssignmentIn):
+    name=payload.name.strip()
+    if not name:raise HTTPException(422,'Säljaren måste ha ett namn')
+    number=str(payload.number)
+    with engine.begin() as db:
+        event=db.execute(text('SELECT status FROM flea_events WHERE id=:e'),{'e':eid}).first()
+        if not event:raise HTTPException(404,'Loppis saknas')
+        if event[0]=='closed':raise HTTPException(409,'Avslutad loppis kan inte ändras')
+        previous=db.execute(text('SELECT name FROM event_sellers WHERE event_id=:e AND number=:n'),{'e':eid,'n':number}).first()
+        # A number that has been sold under must never be reassigned.
+        used=db.execute(text('SELECT 1 FROM sale_items si JOIN sales sa ON sa.id=si.sale_id WHERE sa.event_id=:e AND si.seller=:n LIMIT 1'),{'e':eid,'n':number}).first()
+        if used and previous and previous[0]!=name:raise HTTPException(409,'Numret har försäljning och får inte byta ägare')
+        if previous:
+            db.execute(text('UPDATE event_sellers SET name=:name,seller_type=:type WHERE event_id=:e AND number=:n'),{'name':name,'type':payload.seller_type,'e':eid,'n':number})
+        else:
+            db.execute(text('INSERT INTO event_sellers (event_id,number,name,seller_type,assigned_at) VALUES (:e,:n,:name,:type,:at)'),{'e':eid,'n':number,'name':name,'type':payload.seller_type,'at':stamp()})
+        db.execute(text('INSERT INTO event_seller_audit (id,event_id,number,old_name,new_name,actor,created_at) VALUES (:id,:e,:n,:old,:new,:actor,:at)'),{'id':str(uuid.uuid4()),'e':eid,'n':number,'old':previous[0] if previous else None,'new':name,'actor':payload.actor,'at':stamp()})
+    return {'number':number,'name':name,'status':'assigned'}
+
+@router.delete('/api/v5/events/{eid}/sellers/{number}')
+def unassign_event_seller(eid:str,number:int,actor:str='Administratör'):
+    if not 1<=number<=250:raise HTTPException(422,'Ogiltigt säljnummer')
+    with engine.begin() as db:
+        event=db.execute(text('SELECT status FROM flea_events WHERE id=:e'),{'e':eid}).first()
+        if not event:raise HTTPException(404,'Loppis saknas')
+        if event[0]!='draft':raise HTTPException(409,'Nummer kan bara frigöras före start')
+        old=db.execute(text('SELECT name FROM event_sellers WHERE event_id=:e AND number=:n'),{'e':eid,'n':str(number)}).first()
+        if old:
+            db.execute(text('DELETE FROM event_sellers WHERE event_id=:e AND number=:n'),{'e':eid,'n':str(number)})
+            db.execute(text('INSERT INTO event_seller_audit (id,event_id,number,old_name,new_name,actor,created_at) VALUES (:id,:e,:n,:old,NULL,:actor,:at)'),{'id':str(uuid.uuid4()),'e':eid,'n':str(number),'old':old[0],'actor':actor,'at':stamp()})
+    return {'ok':True}
+
+@router.post('/api/v5/events/{eid}/start')
+def start_event(eid:str):
+    with engine.begin() as db:
+        event=db.execute(text('SELECT status FROM flea_events WHERE id=:e'+(' FOR UPDATE' if db.engine.dialect.name=='postgresql' else '')),{'e':eid}).first()
+        if not event:raise HTTPException(404,'Loppis saknas')
+        if event[0]!='draft':raise HTTPException(409,'Bara utkast kan startas')
+        if db.execute(text("SELECT 1 FROM flea_events WHERE status='open'")).first():raise HTTPException(409,'En annan loppis pågår')
+        rows=db.execute(text('SELECT number,name FROM event_sellers WHERE event_id=:e'),{'e':eid}).all()
+        if not rows:raise HTTPException(409,'Tilldela minst en namngiven säljare före start')
+        if any(not name.strip() for _,name in rows):raise HTTPException(409,'Alla tilldelade säljnummer måste ha namn')
+        db.execute(text("UPDATE flea_events SET status='open' WHERE id=:e"),{'e':eid})
+    return {'id':eid,'status':'open','assigned':len(rows)}
 
 @router.post('/api/v5/events/{eid}/close')
 def close_event(eid:str):
