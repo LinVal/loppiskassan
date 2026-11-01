@@ -42,14 +42,16 @@ def install_staff(db_engine):
 def required_role(path,method):
     if path=='/health' or path=='/mobile' or path=='/seller' or path.startswith('/api/portal/') or path.startswith('/api/mobile/'):
         return None
-    if path=='/api/staff/change-password': return 'cashier'
-    if path.startswith('/api/staff') or path=='/staff': return 'admin'
+    if path in ('/api/staff/change-password','/api/staff/me'): return 'cashier'
+    if path.startswith('/api/staff') or path=='/staff' or path.startswith('/api/admin/'): return 'admin'
     if path.startswith('/api/v5/events') and method in ('POST','PUT','PATCH','DELETE'):return 'admin'
     if path.startswith('/api/v5/events/') and ('settlement' in path or 'payouts' in path):return 'admin'
     if path.startswith('/api/v5/sellers/') and method in ('PUT','POST','PATCH','DELETE'):return 'admin'
     if path.startswith('/api/v4/sellers') and method in ('POST','PUT','PATCH','DELETE'):return 'admin'
     if path.startswith('/api/v4/adjustments') and method=='POST':return 'admin'
     if path in ('/admin','/events'):return 'admin'
+    if path.startswith('/api/v4/sales') or path.startswith('/api/sales') or path.startswith('/api/sellers/summary') or path.startswith('/api/v4/adjustments'):return 'admin'
+    if path.startswith('/api/v5/events') and method=='GET':return 'admin'
     if path.startswith('/api/v4/reports') or path.startswith('/api/v5/events/') and ('settlement' in path or 'payouts' in path):return 'admin'
     return 'cashier'
 
@@ -85,6 +87,10 @@ class StaffIn(BaseModel):
     username:str=Field(min_length=2,max_length=100,pattern=r'^[a-zA-Z0-9_.-]+$')
     password:str=Field(min_length=12,max_length=256)
     role:str=Field(pattern='^(admin|cashier)$')
+
+@router.get('/api/staff/me')
+def current_staff(request:Request):
+    return {'username':request.state.staff_username,'role':request.state.staff_role}
 
 @router.get('/api/staff')
 def list_staff():

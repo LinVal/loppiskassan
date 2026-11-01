@@ -1,4 +1,4 @@
-"""Loppiskassan v2: demonstrator, NOT production-ready. HTTPS at reverse proxy."""
+"""Loppiskassan cashier API."""
 import os, uuid, secrets, datetime, pathlib, hmac, base64, json, logging
 from fastapi import FastAPI, HTTPException, UploadFile, File, Header, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -41,6 +41,8 @@ with engine.begin() as db:
     db.execute(text('CREATE TABLE IF NOT EXISTS photos (id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, filename VARCHAR(150) NOT NULL, created_at VARCHAR(40) NOT NULL)'))
     db.execute(text('CREATE TABLE IF NOT EXISTS sales (id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) UNIQUE NOT NULL, register_no VARCHAR(16) NOT NULL, total INTEGER NOT NULL, method VARCHAR(40) NOT NULL, recipient VARCHAR(150) NOT NULL, created_at VARCHAR(40) NOT NULL)'))
     db.execute(text('CREATE TABLE IF NOT EXISTS sale_items (id VARCHAR(64) PRIMARY KEY, sale_id VARCHAR(64) NOT NULL, seller VARCHAR(12) NOT NULL, description VARCHAR(200), price INTEGER NOT NULL)'))
+    db.execute(text('''CREATE TABLE IF NOT EXISTS item_evidence (item_id VARCHAR(64) PRIMARY KEY, photo_id VARCHAR(64), ai_seller VARCHAR(12), ai_price INTEGER, ai_description VARCHAR(200), ai_uncertain INTEGER NOT NULL DEFAULT 1, FOREIGN KEY(item_id) REFERENCES sale_items(id))'''))
+    db.execute(text('''CREATE TABLE IF NOT EXISTS register_reconciliations (id VARCHAR(64) PRIMARY KEY, event_id VARCHAR(64) NOT NULL, register_no VARCHAR(16) NOT NULL, method VARCHAR(40) NOT NULL, counted_amount INTEGER NOT NULL, expected_amount INTEGER NOT NULL, actor VARCHAR(100) NOT NULL, note VARCHAR(500), created_at VARCHAR(40) NOT NULL)'''))
 
 def now(): return datetime.datetime.now(datetime.timezone.utc)
 def iso(d): return d.isoformat()
@@ -52,6 +54,11 @@ class Item(BaseModel):
     seller: str=Field(pattern=r'^\d{1,4}$')
     desc: str=Field(default='',max_length=200)
     price: int=Field(gt=0,le=1000000, strict=True)
+    photo_id: str | None = None
+    ai_seller: str | None = Field(default=None,max_length=12)
+    ai_price: int | None = None
+    ai_description: str | None = Field(default=None,max_length=200)
+    ai_uncertain: bool = True
 
     @field_validator('price')
     @classmethod
@@ -247,9 +254,14 @@ def save_sale(sid:str,payload:Sale):
         event_id=event_for_sale(db)
         db.execute(text('INSERT INTO sales (id,session_id,register_no,total,method,recipient,created_at,event_id) VALUES (:id,:s,:r,:t,:m,:p,:c,:e)'),dict(id=sale_id,s=sid,r=s['register_no'],t=total,m=payload.method,p=payload.recipient,c=iso(now()),e=event_id))
         for x in payload.items:
+            if x.photo_id and not db.execute(text('SELECT 1 FROM photos WHERE id=:p AND session_id=:s'),{'p':x.photo_id,'s':sid}).first():
+                raise HTTPException(422,'Originalbilden tillhör inte köpet')
             validate_event_seller(db,event_id,x.seller)
             rate=commission_for_seller(db,x.seller)
-            db.execute(text('INSERT INTO sale_items (id,sale_id,seller,description,price,commission_bps) VALUES (:id,:s,:seller,:d,:p,:bps)'),dict(id=str(uuid.uuid4()),s=sale_id,seller=x.seller,d=x.desc,p=x.price,bps=rate))
+            item_id=str(uuid.uuid4())
+            db.execute(text('INSERT INTO sale_items (id,sale_id,seller,description,price,commission_bps) VALUES (:id,:s,:seller,:d,:p,:bps)'),dict(id=item_id,s=sale_id,seller=x.seller,d=x.desc,p=x.price,bps=rate))
+            if x.photo_id:
+                db.execute(text('INSERT INTO item_evidence VALUES (:id,:photo,:seller,:price,:description,:uncertain)'),dict(id=item_id,photo=x.photo_id,seller=x.ai_seller,price=x.ai_price,description=x.ai_description,uncertain=int(x.ai_uncertain)))
         db.execute(text("UPDATE sessions SET status='closed' WHERE id=:s"),{'s':sid})
     return {'sale_id':sale_id,'total':total,'already_saved':False}
 
@@ -258,6 +270,36 @@ def sales():
     with engine.connect() as db:
         rows=db.execute(text('SELECT id,register_no,total,method,recipient,created_at FROM sales ORDER BY created_at DESC LIMIT 200')).mappings().all()
     return {'sales':[dict(r) for r in rows]}
+
+@app.get('/api/cashier/recent-sales')
+def cashier_recent_sales(request:Request, register_no:str, limit:int=10):
+    # Only sales from requested register
+    if not register_no or len(register_no)>16: raise HTTPException(422,'Ogiltigt kassanummer')
+    with engine.connect() as db:
+        rows=db.execute(text('SELECT id,total,method,created_at FROM sales WHERE register_no=:r ORDER BY created_at DESC LIMIT :n'),{'r':register_no,'n':max(1,min(limit,25))}).mappings().all()
+    return {'sales':[dict(x) for x in rows]}
+
+class Reconciliation(BaseModel):
+    event_id:str
+    register_no:str=Field(min_length=1,max_length=16)
+    method:str=Field(pattern='^(Swish|Kontant|Kort)$')
+    counted_amount:int=Field(ge=0,strict=True)
+    note:str=Field(default='',max_length=500)
+
+@app.get('/api/admin/register-reconciliation')
+def register_reconciliation(event_id:str):
+    with engine.connect() as db:
+        rows=db.execute(text('''SELECT register_no,method,COUNT(*) AS sales_count,SUM(total) AS expected_amount FROM sales WHERE event_id=:e GROUP BY register_no,method ORDER BY register_no,method'''),{'e':event_id}).mappings().all()
+        checks=db.execute(text('''SELECT register_no,method,counted_amount,expected_amount,actor,note,created_at FROM register_reconciliations WHERE event_id=:e ORDER BY created_at DESC'''),{'e':event_id}).mappings().all()
+    return {'expected':[dict(r) for r in rows],'reconciliations':[dict(r,difference=r['counted_amount']-r['expected_amount']) for r in checks], 'note':'Avstämning av manuellt rapporterade belopp. Ingen automatisk kontroll mot Swish- eller kortleverantör.'}
+
+@app.post('/api/admin/register-reconciliation',status_code=201)
+def save_reconciliation(payload:Reconciliation,request:Request):
+    with engine.begin() as db:
+        if not db.execute(text('SELECT 1 FROM events WHERE id=:e'),{'e':payload.event_id}).first():raise HTTPException(404,'Loppistillfället saknas')
+        expected=db.execute(text('SELECT COALESCE(SUM(total),0) FROM sales WHERE event_id=:e AND register_no=:r AND method=:m'),{'e':payload.event_id,'r':payload.register_no,'m':payload.method}).scalar_one()
+        db.execute(text('INSERT INTO register_reconciliations VALUES (:id,:e,:r,:m,:counted,:expected,:actor,:note,:at)'),dict(id=str(uuid.uuid4()),e=payload.event_id,r=payload.register_no,m=payload.method,counted=payload.counted_amount,expected=expected,actor=request.state.staff_username,note=payload.note,at=iso(now())))
+    return {'expected_amount':expected,'counted_amount':payload.counted_amount,'difference':payload.counted_amount-expected}
 
 @app.get('/api/sellers/summary')
 def summary():

@@ -190,7 +190,7 @@ async function check(){
    feedback('Ny bild mottagen. Du kan skanna fler lappar eller granska varorna.');
    refreshPhotoGallery();persistDraft();
   }
- }catch(e){status('Servern kan inte nås');feedback('Ingen kontakt med servern. Behåll köpet och försök igen.','warning')}
+ }catch(e){status('Servern kan inte nås');feedback('Ingen kontakt med servern. Köpet ligger kvar. Kontrollera nätet och försök igen.','warning')}
 }
 async function choosePhoto(pid){
  if(!sid||!pid)return;
@@ -223,7 +223,7 @@ el('analyzePhoto').onclick=async()=>{
  try{
   let data=await api('/api/sessions/'+sid+'/photos/'+latestPhoto+'/analyze',{method:'POST'});
   const nextId=Math.max(0,...items.map(x=>Number(x.id)||0));
-  const added=data.items.map((x,i)=>({...x,id:nextId+i+1,photoId:latestPhoto,uncertain:true}));
+  const added=data.items.map((x,i)=>({...x,id:nextId+i+1,photoId:latestPhoto,aiSeller:String(x.seller||""),aiPrice:Number(x.price)||0,aiDescription:String(x.desc||""),aiUncertain:!!x.uncertain,uncertain:true}));
   items.push(...added);analyzedPhotos.add(latestPhoto);selected=added[0]?.id||selected;render();refreshPhotoGallery();persistDraft();
   el('photoStatus').textContent='AI lade till '+data.count+' lappar. '+(data.note||'')+' Kontrollera antalet och varje rad mot bilden.';
   el('aiHint').textContent='Nya AI-rader är markerade för manuell kontroll.';feedback('AI-förslagen är klara. Kontrollera '+data.count+' lappar, en i taget.','warning');updateSteps('stepReview');
@@ -247,7 +247,7 @@ el('cashReceived').addEventListener('input',()=>{el('confirmed').checked=false;u
 updateCash();
 async function submitServerSale(){
  if(submitting||!sid)return;
- if(!paymentSnapshot || paymentSnapshot!==JSON.stringify({items:items.map(x=>({seller:String(x.seller),desc:x.desc,price:Number(x.price)})),total:sum(),...paymentDetails()})){feedback('Köpet har ändrats sedan slutgranskningen. Granska och bekräfta betalningen igen.','warning');el('confirmed').checked=false;return;}
+ if(!paymentSnapshot || paymentSnapshot!==JSON.stringify({items:items.map(x=>({seller:String(x.seller),desc:x.desc,price:Number(x.price),photo_id:x.photoId||null,ai_seller:x.aiSeller||null,ai_price:x.aiPrice??null,ai_description:x.aiDescription||null,ai_uncertain:x.aiUncertain??true})),total:sum(),...paymentDetails()})){feedback('Köpet har ändrats sedan slutgranskningen. Granska och bekräfta betalningen igen.','warning');el('confirmed').checked=false;return;}
  submitting=true;persistDraft();el('finish').disabled=true;
  feedback('Sparar köpet på servern. Stäng inte sidan.');
  try{
@@ -255,7 +255,7 @@ async function submitServerSale(){
   // Samma sessions-ID återanvänds alltid. Servern garanterar idempotens.
   let existing=null;
   try{const state=await api('/api/sessions/'+sid+'/status');if(state.status==='closed'&&state.sale_id)existing={sale_id:state.sale_id,total:state.total,already_saved:true}}catch(_){/* försök med samma sessions-ID */}
-  const data=existing||await api('/api/sessions/'+sid+'/sale',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:items.map(x=>({seller:String(x.seller),desc:x.desc,price:Number(x.price)})),...paymentDetails(),payment_confirmed:true})});
+  const data=existing||await api('/api/sessions/'+sid+'/sale',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:items.map(x=>({seller:String(x.seller),desc:x.desc,price:Number(x.price),photo_id:x.photoId||null,ai_seller:x.aiSeller||null,ai_price:x.aiPrice??null,ai_description:x.aiDescription||null,ai_uncertain:x.aiUncertain??true})),...paymentDetails(),payment_confirmed:true})});
   forgetDraft();sid=null;latestPhoto=null;salePhotos=[];analyzedPhotos.clear();activePhoto=null;refreshPhotoGallery();el('analyzePhoto').disabled=true;
   if(poll)clearInterval(poll);el('pairMobile').disabled=true;el('pairView').style.display='none';
   status('Köp sparat på servern');updateSteps('stepDone');
@@ -273,7 +273,7 @@ el('finish').onclick=()=>{
  if(items.some(x=>x.uncertain)){feedback('Granska de gulmarkerade lapparna individuellt innan betalning.','warning');updateSteps('stepReview');return;}
  if(el('method').value==='Kontant' && (!el('cashReceived').value.trim() || !Number.isInteger(Number(el('cashReceived').value)) || Number(el('cashReceived').value)<sum())){feedback('Ange ett mottaget kontantbelopp som täcker köpet.','warning');updateSteps('stepPay');return;}
  if(!el('confirmed').checked||!el('recipient').value.trim()){feedback('Ange betalningsmottagare och bekräfta mottagen betalning.','warning');updateSteps('stepPay');return;}
- paymentSnapshot=JSON.stringify({items:items.map(x=>({seller:String(x.seller),desc:x.desc,price:Number(x.price)})),total:sum(),...paymentDetails()});
+ paymentSnapshot=JSON.stringify({items:items.map(x=>({seller:String(x.seller),desc:x.desc,price:Number(x.price),photo_id:x.photoId||null,ai_seller:x.aiSeller||null,ai_price:x.aiPrice??null,ai_description:x.aiDescription||null,ai_uncertain:x.aiUncertain??true})),total:sum(),...paymentDetails()});
  updateSteps('stepPay');
  showDialog('Bekräfta försäljningen',[['Att betala',money(sum())],['Antal varor',String(items.length)],['Betalsätt',el('method').value],['Mottagare',el('recipient').value.trim()],...(el('method').value==='Kontant'?[['Mottaget',money(Number(el('cashReceived').value))],['Växel',money(Number(el('cashReceived').value)-sum())]]:[]),['Betalning','Manuellt bekräftad av kassapersonal']],[["Tillbaka och kontrollera",'secondary',()=>{}],["Spara köp på servern",'primary',()=>submitServerSale()]]);
 };
@@ -362,6 +362,21 @@ restoreDraft();
  views.history.append(history);
  // Knapparna ändrar bara synlig vy; den befintliga köp-/betalningslogiken är oförändrad.
  let saved='scan';try{saved=sessionStorage.getItem('loppiskassan.cashierView.live')||'scan'}catch(_){ }
+ const recent=document.createElement('section');recent.className='card';recent.innerHTML='<h3>Senaste köp i vald kassa</h3><p class="muted">Visar registrerade köp på servern, inte övningsköp.</p><button type="button" class="secondary" id="loadRecentSales">Uppdatera köphistorik</button><div id="recentSalesResult" role="status" aria-live="polite"></div>';
+ views.history.append(recent);
+ document.getElementById('loadRecentSales').onclick=async()=>{
+   const target=document.getElementById('recentSalesResult');target.textContent='Hämtar köp…';
+   try{
+     const reg=document.getElementById('register').value;
+     const res=await fetch('/api/cashier/recent-sales?register_no='+encodeURIComponent(reg),{cache:'no-store'});
+     if(!res.ok)throw new Error('HTTP '+res.status);
+     const data=await res.json();target.replaceChildren();
+     if(!data.sales.length){target.textContent='Inga registrerade köp för kassa '+reg+'.';return;}
+     const table=document.createElement('table');table.innerHTML='<thead><tr><th>Tid</th><th>Betalsätt</th><th>Summa</th></tr></thead>';
+     const body=document.createElement('tbody');
+     for(const row of data.sales){const tr=document.createElement('tr');for(const val of [new Date(row.created_at).toLocaleString('sv-SE'),row.method,Number(row.total).toLocaleString('sv-SE')+' kr']){const td=document.createElement('td');td.textContent=val;tr.append(td)}body.append(tr)}table.append(body);target.append(table);
+   }catch(e){target.textContent='Kunde inte hämta köphistorik. Kontrollera nätet och försök igen.'}
+ };
  show(views[saved]?saved:'scan');window.cashierRefreshPhotos?.();
  tabs.addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight'].includes(e.key))return;const keys=Object.keys(views);const current=keys.findIndex(k=>document.getElementById('cashier-tab-'+k)===document.activeElement);if(current<0)return;e.preventDefault();const next=keys[(current+(e.key==='ArrowRight'?1:-1)+keys.length)%keys.length];show(next);document.getElementById('cashier-tab-'+next).focus()});
 })();
