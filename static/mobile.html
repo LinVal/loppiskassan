@@ -53,14 +53,4 @@ document.getElementById('startQR').onclick=async()=>{
 };
 window.addEventListener('pagehide',stopQR);
 document.getElementById('sendQR').onclick=async()=>{try{await submitQR(document.getElementById('qrManual').value.trim());document.getElementById('qrManual').value=''}catch(e){qrStatus.textContent='Fel: '+e.message}};
-function stopQR(){if(qrTimer)clearInterval(qrTimer);qrTimer=null;if(qrStream)qrStream.getTracks().forEach(t=>t.stop());qrStream=null;document.getElementById('qrVideo').style.display='none';document.getElementById('stopQR').style.display='none';document.getElementById('startQR').style.display='block'}
-document.getElementById('stopQR').onclick=stopQR;
-document.getElementById('startQR').onclick=async()=>{
- if(!('BarcodeDetector' in window)){qrStatus.textContent='Safari saknar direktavläsning här. Använd QR-fotofunktionen ovan.';return}
- try{
-  const detector=new BarcodeDetector({formats:['qr_code']});qrStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:false});
-  const video=document.getElementById('qrVideo');video.srcObject=qrStream;video.style.display='block';await video.play();document.getElementById('stopQR').style.display='block';document.getElementById('startQR').style.display='none';qrStatus.textContent='Rikta kameran mot en QR-prislapp.';
-  qrTimer=setInterval(async()=>{if(qrBusy||!qrStream)return;qrBusy=true;try{const found=await detector.detect(video);for(const code of found){const value=code.rawValue||'';if(!value.startsWith('LK1|'))continue;if(value===lastQR&&Date.now()-lastQRTime<5000)continue;lastQR=value;lastQRTime=Date.now();await submitQR(value);break}}catch(e){qrStatus.textContent='Fel: '+e.message}finally{qrBusy=false}},500);
- }catch(e){stopQR();qrStatus.textContent='Kameran kunde inte öppnas: '+e.message}
-};window.addEventListener('pagehide',stopQR);
 </script></html>

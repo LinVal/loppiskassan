@@ -383,4 +383,5 @@ app.include_router(staff_router)
 from events import router as v5_router, install as install_v5
 install_v5(engine)
 app.include_router(v5_router)
+app.mount('/static',StaticFiles(directory=ROOT/'static'),name='static-assets')
 app.mount('/',StaticFiles(directory=ROOT/'static',html=True),name='frontend')
