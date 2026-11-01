@@ -183,7 +183,18 @@ async def mobile_qr_photo(token: str, photo: UploadFile = File(...)):
     payload, _, _ = cv2.QRCodeDetector().detectAndDecode(picture)
     if not payload:
         raise HTTPException(422, 'Ingen QR-kod hittades. Håll kameran stilla och fyll bilden med koden.')
-    return mobile_qr(token, QRScan(scan_id=str(uuid.uuid4()), payload=payload))
+    # Camera sends repeated frames; suppress the same code for a short window.
+    parts = payload.split('|', 3)
+    if len(parts) == 4 and parts[0] == 'LK1':
+        with engine.connect() as db:
+            pairing = db.execute(text('SELECT * FROM pairings WHERE token=:t'), {'t': token}).mappings().first()
+            if pairing and datetime.datetime.fromisoformat(pairing['expires_at']) >= now():
+                previous = db.execute(text('SELECT created_at FROM qr_scans WHERE session_id=:sid AND seller=:seller AND price=:price AND description=:description ORDER BY created_at DESC LIMIT 1'),
+                    {'sid': pairing['session_id'], 'seller': str(int(parts[1])) if parts[1].isdigit() else parts[1], 'price': int(parts[2]) if parts[2].isdigit() else -1, 'description': parts[3]}).first()
+                if previous and (now() - datetime.datetime.fromisoformat(previous[0])).total_seconds() < 4.5:
+                    return {'status': 'already_received', 'payload': payload}
+    result = mobile_qr(token, QRScan(scan_id=str(uuid.uuid4()), payload=payload))
+    return {**result, 'payload': payload}
 
 @app.get('/api/sessions/{sid}/qr-scans')
 def session_qr_scans(sid: str):
