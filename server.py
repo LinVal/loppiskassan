@@ -39,6 +39,7 @@ with engine.begin() as db:
     db.execute(text('CREATE TABLE IF NOT EXISTS sessions (id VARCHAR(64) PRIMARY KEY, register_no VARCHAR(16) NOT NULL, created_at VARCHAR(40) NOT NULL, status VARCHAR(20) NOT NULL)'))
     db.execute(text('CREATE TABLE IF NOT EXISTS pairings (token VARCHAR(100) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, expires_at VARCHAR(40) NOT NULL, used INTEGER NOT NULL DEFAULT 0)'))
     db.execute(text('CREATE TABLE IF NOT EXISTS photos (id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, filename VARCHAR(150) NOT NULL, created_at VARCHAR(40) NOT NULL)'))
+    db.execute(text('CREATE TABLE IF NOT EXISTS qr_scans (id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, seller VARCHAR(4) NOT NULL, price INTEGER NOT NULL, description VARCHAR(200) NOT NULL, created_at VARCHAR(40) NOT NULL)'))
     db.execute(text('CREATE TABLE IF NOT EXISTS sales (id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) UNIQUE NOT NULL, register_no VARCHAR(16) NOT NULL, total INTEGER NOT NULL, method VARCHAR(40) NOT NULL, recipient VARCHAR(150) NOT NULL, created_at VARCHAR(40) NOT NULL)'))
     db.execute(text('CREATE TABLE IF NOT EXISTS sale_items (id VARCHAR(64) PRIMARY KEY, sale_id VARCHAR(64) NOT NULL, seller VARCHAR(12) NOT NULL, description VARCHAR(200), price INTEGER NOT NULL)'))
     db.execute(text('''CREATE TABLE IF NOT EXISTS item_evidence (item_id VARCHAR(64) PRIMARY KEY, photo_id VARCHAR(64), ai_seller VARCHAR(12), ai_price INTEGER, ai_description VARCHAR(200), ai_uncertain INTEGER NOT NULL DEFAULT 1, FOREIGN KEY(item_id) REFERENCES sale_items(id))'''))
@@ -136,6 +137,42 @@ async def mobile_photo(token:str,photo:UploadFile=File(...)):
             (UPLOAD/filename).write_bytes(content)
         db.execute(text('INSERT INTO photos VALUES (:id,:s,:f,:c)'),dict(id=pid,s=p['session_id'],f=filename,c=iso(now())))
     return {'photo_id':pid,'status':'uploaded','note':'Bilden är sparad. AI-avläsning görs i kassan.'}
+
+class QRScan(BaseModel):
+    scan_id: str = Field(min_length=36,max_length=36)
+    payload: str = Field(min_length=7,max_length=260)
+
+@app.post('/api/mobile/{token}/qr')
+def mobile_qr(token: str, data: QRScan):
+    """QR is only a proposal; cashier must review it before payment."""
+    try:
+        uuid.UUID(data.scan_id)
+    except ValueError:
+        raise HTTPException(422,'Ogiltigt skannings-ID')
+    parts=data.payload.split('|',3)
+    if len(parts)!=4 or parts[0]!='LK1' or not parts[1].isdigit() or not parts[2].isdigit():
+        raise HTTPException(422,'Okänd QR-kod. Använd Loppiskassans testlappar (LK1).')
+    seller,price,desc=parts[1],int(parts[2]),parts[3]
+    if not (1<=int(seller)<=250 and 5<=price<=1000000 and price%5==0 and len(desc)<=200):
+        raise HTTPException(422,'Ogiltigt säljnummer eller pris. Priset ska vara delbart med 5.')
+    with engine.begin() as db:
+        pairing=db.execute(text('SELECT * FROM pairings WHERE token=:t'),{'t':token}).mappings().first()
+        if not pairing or datetime.datetime.fromisoformat(pairing['expires_at'])<now():
+            raise HTTPException(403,'Mobilkopplingen har gått ut. Koppla om mobilen.')
+        session=session_row(db,pairing['session_id'])
+        if not session or session['status']!='open': raise HTTPException(409,'Köpet är stängt')
+        existing=db.execute(text('SELECT id FROM qr_scans WHERE id=:id'),{'id':data.scan_id}).first()
+        if existing: return {'status':'already_received','scan_id':data.scan_id}
+        db.execute(text('INSERT INTO qr_scans VALUES (:id,:sid,:seller,:price,:description,:created)'),
+          {'id':data.scan_id,'sid':pairing['session_id'],'seller':str(int(seller)),'price':price,'description':desc,'created':iso(now())})
+    return {'status':'received','scan_id':data.scan_id}
+
+@app.get('/api/sessions/{sid}/qr-scans')
+def session_qr_scans(sid: str):
+    with engine.connect() as db:
+        if not session_row(db,sid): raise HTTPException(404,'Köp saknas')
+        rows=db.execute(text('SELECT id,seller,price,description FROM qr_scans WHERE session_id=:sid ORDER BY created_at,id'),{'sid':sid}).mappings().all()
+    return {'scans':[dict(r) for r in rows]}
 
 @app.get('/api/sessions/{sid}/photos')
 def photos(sid:str):
