@@ -49,7 +49,7 @@ function sum(){return items.reduce((a,x)=>a+(validPrice(x.price)?Number(x.price)
  const finish=document.getElementById('finish')?.closest('.footer-actions');
  if(!scan||!stats||!grid||!review||!payment||!total||!finish||!history)return;
  const tabs=document.createElement('nav');tabs.className='cashier-tabs';tabs.setAttribute('aria-label','Kassans arbetsvyer');
- const config=[['scan','1. Starta & skanna','Starta köp och fotografera'],['review','2. Granska varor','Kontrollera lappar och priser'],['pay','3. Betalning','Bekräfta och spara'],['history','Historik','Övningshistorik']];
+ const config=[['scan','1. Starta & skanna','Starta köp och fotografera'],['review','2. Granska varor','Kontrollera lappar och priser'],['pay','3. Betalning','Bekräfta och spara'],['history','4. Historik','Övningshistorik']];
  const views={};
  for(const [id,label,hint] of config){
    const btn=document.createElement('button');btn.type='button';btn.className='cashier-tab';btn.id='cashier-tab-'+id;btn.setAttribute('role','tab');btn.setAttribute('aria-controls','cashier-view-'+id);btn.innerHTML='<strong>'+label+'</strong><small>'+hint+'</small>';tabs.append(btn);
@@ -58,7 +58,7 @@ function sum(){return items.reduce((a,x)=>a+(validPrice(x.price)?Number(x.price)
  }
  function show(id){
    for(const [key,pane] of Object.entries(views)){const active=key===id;pane.hidden=!active;document.getElementById('cashier-tab-'+key).setAttribute('aria-selected',String(active));document.getElementById('cashier-tab-'+key).tabIndex=active?0:-1;}
-   try{sessionStorage.setItem('loppiskassan.cashierView',id)}catch(_){ }
+   try{sessionStorage.setItem('loppiskassan.cashierView.demo',id)}catch(_){ }
  }
  function navButton(text,target){const b=document.createElement('button');b.type='button';b.className='secondary';b.textContent=text;b.addEventListener('click',()=>{show(target);tabs.scrollIntoView({block:'start',behavior:'smooth'})});return b}
  function intro(title,description){const d=document.createElement('div');d.className='cashier-view-intro';const h=document.createElement('h2');h.textContent=title;const p=document.createElement('p');p.className='muted';p.textContent=description;d.append(h,p);return d}
@@ -106,7 +106,7 @@ function sum(){return items.reduce((a,x)=>a+(validPrice(x.price)?Number(x.price)
  views.pay.append(backPay,payCard);
  views.history.append(intro('Demohistorik','Övningshistorik finns bara i den här webbläsaren.'),history);
  // Knapparna ändrar bara synlig vy; den befintliga köp-/betalningslogiken är oförändrad.
- let saved='scan';try{saved=sessionStorage.getItem('loppiskassan.cashierView')||'scan'}catch(_){ }
+ let saved='scan';try{saved=sessionStorage.getItem('loppiskassan.cashierView.demo')||'scan'}catch(_){ }
  show(views[saved]?saved:'scan');
  tabs.addEventListener('keydown',e=>{if(!['ArrowLeft','ArrowRight'].includes(e.key))return;const keys=Object.keys(views);const current=keys.findIndex(k=>document.getElementById('cashier-tab-'+k)===document.activeElement);if(current<0)return;e.preventDefault();const next=keys[(current+(e.key==='ArrowRight'?1:-1)+keys.length)%keys.length];show(next);document.getElementById('cashier-tab-'+next).focus()});
 })();
