@@ -349,4 +349,10 @@ def settlement_csv(eid:str):
 @router.get('/events')
 def event_page():
     from pathlib import Path
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse('/admin#events', status_code=307)
+
+@router.get('/events/module')
+def events_module():
+    from pathlib import Path
     return FileResponse(Path(__file__).parent/'static'/'events.html')

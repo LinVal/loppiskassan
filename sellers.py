@@ -150,4 +150,9 @@ def report_csv():
 @router.get('/admin')
 def admin_page():
     from pathlib import Path
+    return FileResponse(Path(__file__).parent/'static'/'admin-shell.html')
+
+@router.get('/admin/module')
+def admin_module():
+    from pathlib import Path
     return FileResponse(Path(__file__).parent/'static'/'admin.html')
