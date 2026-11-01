@@ -167,6 +167,24 @@ def mobile_qr(token: str, data: QRScan):
           {'id':data.scan_id,'sid':pairing['session_id'],'seller':str(int(seller)),'price':price,'description':desc,'created':iso(now())})
     return {'status':'received','scan_id':data.scan_id}
 
+@app.post('/api/mobile/{token}/qr-photo')
+async def mobile_qr_photo(token: str, photo: UploadFile = File(...)):
+    """Decode a photographed QR code on the server (Safari-compatible)."""
+    import cv2
+    import numpy as np
+    content = await photo.read(6_000_001)
+    if len(content) > 6_000_000:
+        raise HTTPException(413, 'QR-bilden får vara högst 6 MB')
+    if not (content.startswith(b'\xff\xd8\xff') or content.startswith(b'\x89PNG\r\n\x1a\n')):
+        raise HTTPException(415, 'Använd JPEG eller PNG för QR-foto')
+    picture = cv2.imdecode(np.frombuffer(content, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if picture is None or picture.shape[0] * picture.shape[1] > 20_000_000:
+        raise HTTPException(422, 'Bilden kunde inte läsas')
+    payload, _, _ = cv2.QRCodeDetector().detectAndDecode(picture)
+    if not payload:
+        raise HTTPException(422, 'Ingen QR-kod hittades. Håll kameran stilla och fyll bilden med koden.')
+    return mobile_qr(token, QRScan(scan_id=str(uuid.uuid4()), payload=payload))
+
 @app.get('/api/sessions/{sid}/qr-scans')
 def session_qr_scans(sid: str):
     with engine.connect() as db:

@@ -19,3 +19,8 @@
 
 ## Testa
 Skanna minst två olika QR-lappar, fotografera sedan en vanlig lapp och kontrollera att allt hamnar i samma köp. Prova även felaktig kod, utgången mobilkoppling och nätverksavbrott.
+
+## iPhone och Safari
+Välj **Skanna QR med iPhone-kameran**, ta ett foto av en QR-testlapp och tryck **Läs QR från foto**. QR-koden läses på servern och skickas till samma köp. Det kräver inte BarcodeDetector i Safari. JPEG/PNG stöds, högst 6 MB. Direktkameran är endast ett alternativ för webbläsare med BarcodeDetector.
+
+**Drift:** Den nya serveravläsningen kräver `opencv-python-headless` (ingår i requirements.txt). Kör tester och verifiera en riktig iPhone-fotografering efter deploy.
