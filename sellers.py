@@ -147,6 +147,11 @@ def report_csv():
     for row in data:writer.writerow([row['seller'],row['items'],row['gross'],row['corrections'],row['net']])
     return StreamingResponse(iter([output.getvalue().encode('utf-8')]),media_type='text/csv; charset=utf-8',headers={'Content-Disposition':'attachment; filename="saljarredovisning.csv"'})
 
+@router.get('/demo')
+def demo_cashier_page():
+    from pathlib import Path
+    return FileResponse(Path(__file__).parent/'static'/'demo.html')
+
 @router.get('/app')
 @router.get('/admin')
 def admin_page():
