@@ -314,6 +314,24 @@ el('finish').onclick=()=>{
  setTimeout(persistDraft,0);
 },true));
 window.addEventListener('pagehide',persistDraft);
+// Clear the *server* purchase as well as the local draft. Never let polling restore old scans.
+el('reset').onclick=async()=>{
+ if(submitting)return;
+ if(!confirm('Avbryt pågående köp och rensa alla skannade varor? Mobilen behöver kopplas om efteråt.'))return;
+ el('reset').disabled=true;
+ try{
+   if(sid)await api('/api/sessions/'+encodeURIComponent(sid)+'/cancel',{method:'POST'});
+   if(poll){clearInterval(poll);poll=null;}
+   forgetDraft();sid=null;items=[];selected=0;imageSrc='';latestPhoto=null;activePhoto=null;
+   salePhotos=[];analyzedPhotos.clear();failedPhotos.clear();seen.clear();seenQR.clear();
+   paymentSnapshot=null;el('confirmed').checked=false;el('recipient').value='';el('cashReceived').value='';
+   el('pairView').style.display='none';el('pairMobile').disabled=false;
+   el('photoStatus').textContent='';el('analyzePhoto').disabled=true;
+   refreshPhotoGallery();render();updateSteps('stepScan');
+   status('Inget aktivt köp');feedback('Varulistan och det pågående serverköpet är rensade. Starta en ny mobilkoppling.','success');
+ }catch(e){feedback('Kunde inte avbryta serverköpet: '+e.message+'. Inget har rensats.','warning')}
+ finally{el('reset').disabled=false;}
+};
 window.cashierSaleState=()=>({hasSession:Boolean(sid),submitting});
 window.cashierViewData=()=>({items:items.map(x=>({...x})),total:sum()});
 window.cashierRefreshPhotos=refreshPhotoGallery;
@@ -363,18 +381,44 @@ restoreDraft();
  // A4 proof is generated from the current draft BEFORE payment is confirmed.
  // It is not a receipt and does not commit a sale.
  const proofSection=document.createElement('section');proofSection.className='card';
- proofSection.innerHTML='<h3>📄 Kontrollark före betalning</h3><p>Samtliga QR-varor och manuella/AI-lappar i ett gemensamt A4-underlag. Granska detta innan du tar betalt.</p><button type="button" class="secondary" id="openA4Proof">Visa / skriv ut A4-kontrollark</button><p class="muted">Detta är ett utkast, inte en bekräftad försäljning.</p>';
+ proofSection.innerHTML=`<h3>📄 Kontrollark före betalning</h3><p>Öppna underlaget här i steg 2 och jämför med prislapparna innan betalning.</p><button type="button" class="secondary" id="openA4Proof" aria-expanded="false" aria-controls="a4ProofPanel">Visa A4-kontrollark ↓</button><div id="a4ProofPanel" hidden><div class="a4-proof-toolbar"><strong>Förhandsgranskning · EJ BETALT</strong><button type="button" class="secondary" id="printA4Proof">🖨 Skriv ut</button></div><div id="a4ProofContent" class="a4-proof-sheet"></div><p class="muted small">Underlaget uppdateras när du öppnar det på nytt. Det sparar inte köpet.</p></div>`;
  function safeText(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
- document.addEventListener('click',event=>{if(event.target?.id!=='openA4Proof')return;
+ function renderA4Proof(){
    const sale=window.cashierViewData?.()||{items:[],total:0};
-   if(!sale.items.length){alert('Skanna eller lägg till varor innan du öppnar kontrollarket.');return;}
-   const win=window.open('','_blank');if(!win){alert('Tillåt popupfönster för att visa A4-arket.');return;}
-   const rows=sale.items.map((item,i)=>{const qr=Boolean(item.qrScanId);
-     const evidence=qr?'QR-kod (verifierad)':'Manuell/AI-lapp';
+   if(!sale.items.length){alert('Skanna eller lägg till varor innan du öppnar kontrollarket.');return false;}
+   const rows=sale.items.map((item,i)=>{
+     const qr=Boolean(item.qrScanId), evidence=qr?'✓ QR verifierad':'Handskriven / AI-lapp';
      const photo=item.photoId&&window.cashierSaleState?.().sid?'/api/sessions/'+encodeURIComponent(window.cashierSaleState().sid)+'/photos/'+encodeURIComponent(item.photoId):null;
-     return '<article class="label"><strong>Vara '+(i+1)+'</strong><span>'+safeText(evidence)+'</span><div>Säljare: <b>'+safeText(item.seller)+'</b></div><div>Pris: <b>'+safeText(item.price)+' kr</b></div><div>'+safeText(item.desc)+'</div>'+(photo?'<img src="'+safeText(photo)+'" alt="Originalfoto">':'')+(qr?'<div class="payload">QR: LK1|'+safeText(item.seller)+'|'+safeText(item.price)+'|'+safeText(item.desc)+'</div>':'')+'</article>';}).join('');
-   win.document.write('<!doctype html><html lang="sv"><meta charset="utf-8"><title>Kontrollark – ej betalt</title><style>@page{size:A4;margin:12mm}body{font:14px system-ui;color:#222}h1{margin-bottom:4px}.note{background:#fff0b9;padding:10px}.labels{display:grid;grid-template-columns:1fr 1fr;gap:10px}.label{border:1px solid #888;padding:12px;min-height:125px;break-inside:avoid;overflow-wrap:anywhere}.label span{display:block;color:#555;margin:5px 0}.label img{display:block;max-width:100%;max-height:130px;object-fit:contain;margin-top:8px}.payload{font-size:10px;margin-top:8px}@media print{button{display:none}}</style><h1>Loppiskassan – kontrollark</h1><p class="note"><b>EJ BETALT / EJ BEKRÄFTAT</b> – kontrollera mot fysiska lappar.</p><p>'+sale.items.length+' varor · Summa '+safeText(sale.total)+' kr</p><button onclick="print()">Skriv ut A4</button><div class="labels">'+rows+'</div></html>');win.document.close();
+     return '<article class="a4-proof-label"><strong>Vara '+(i+1)+'</strong><span>'+safeText(evidence)+'</span><div>Säljare: <b>'+safeText(item.seller)+'</b></div><div>Pris: <b>'+safeText(item.price)+' kr</b></div><div>'+safeText(item.desc)+'</div>'+(photo?'<img src="'+safeText(photo)+'" alt="Originalfoto">':'')+(qr?'<div class="a4-proof-payload">QR: LK1|'+safeText(item.seller)+'|'+safeText(item.price)+'|'+safeText(item.desc)+'</div>':'')+'</article>';
+   }).join('');
+   document.getElementById('a4ProofContent').innerHTML='<h2>Loppiskassan · Kontrollark</h2><p class="a4-proof-warning"><b>EJ BETALT / EJ BEKRÄFTAT</b> – kontrollera mot fysiska lappar.</p><p>'+sale.items.length+' varor · Summa '+safeText(sale.total)+' kr</p><div class="a4-proof-labels">'+rows+'</div>';
+   return true;
+ }
+ document.addEventListener('click',event=>{
+   if(event.target?.id==='openA4Proof'){
+     const panel=document.getElementById('a4ProofPanel'),button=event.target;
+     if(!panel.hidden){panel.hidden=true;button.setAttribute('aria-expanded','false');button.textContent='Visa A4-kontrollark ↓';return;}
+     if(!renderA4Proof())return;
+     panel.hidden=false;button.setAttribute('aria-expanded','true');button.textContent='Dölj A4-kontrollark ↑';panel.scrollIntoView({block:'nearest',behavior:'smooth'});
+   }
+   if(event.target?.id==='printA4Proof'){
+     if(!renderA4Proof())return;
+     document.body.classList.add('printing-a4-proof');
+     window.print();
+   }
  });
+ window.addEventListener('afterprint',()=>document.body.classList.remove('printing-a4-proof'));
+ const proofStyle=document.createElement('style');proofStyle.textContent=`
+ #a4ProofPanel{margin-top:16px}#a4ProofPanel[hidden]{display:none!important}
+ .a4-proof-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
+ .a4-proof-sheet{background:white;color:#222;border:1px solid #cbd5e1;padding:20px;max-width:794px;margin:auto;box-shadow:0 4px 16px #0001}
+ .a4-proof-warning{background:#fff0b9;padding:10px}
+ .a4-proof-labels{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .a4-proof-label{border:1px solid #888;padding:12px;min-height:125px;break-inside:avoid;overflow-wrap:anywhere}
+ .a4-proof-label span{display:block;color:#555;margin:5px 0}.a4-proof-label img{max-width:100%;max-height:130px;object-fit:contain;margin-top:8px}.a4-proof-payload{font-size:10px;margin-top:8px}
+ @media(max-width:520px){.a4-proof-labels{grid-template-columns:1fr}.a4-proof-sheet{padding:12px}}
+ @media print{@page{size:A4;margin:12mm}body.printing-a4-proof *{visibility:hidden!important}body.printing-a4-proof #a4ProofContent,body.printing-a4-proof #a4ProofContent *{visibility:visible!important}body.printing-a4-proof #a4ProofContent{position:absolute;left:0;top:0;width:100%;max-width:none;box-shadow:none;border:0;padding:0}body.printing-a4-proof .a4-proof-labels{grid-template-columns:1fr 1fr}}
+ `;document.head.append(proofStyle);
  const nextReview=document.createElement('div');nextReview.className='cashier-nav-actions';nextReview.append(navButton('← Till skanning','scan'),navButton('Fortsätt till betalning →','pay'));
  const backPay=document.createElement('div');backPay.className='cashier-nav-actions';backPay.append(navButton('← Till varugranskning','review'));
  main.insertBefore(tabs,scan);

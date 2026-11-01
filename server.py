@@ -99,6 +99,19 @@ def new_session(payload:NewSession):
         db.execute(text('INSERT INTO sessions VALUES (:id,:r,:c,:s)'),dict(id=sid,r=payload.register_no,c=iso(now()),s='open'))
     return {'session_id':sid,'register_no':payload.register_no}
 
+@app.post('/api/sessions/{sid}/cancel')
+def cancel_session(sid: str):
+    """Abandon a draft atomically; invalidate mobile links and stop old scans."""
+    with engine.begin() as db:
+        row=session_row(db,sid)
+        if not row: raise HTTPException(404,'Köp saknas')
+        if row['status']!='open': raise HTTPException(409,'Köpet är redan avslutat')
+        if db.execute(text('SELECT id FROM sales WHERE session_id=:sid'),{'sid':sid}).first():
+            raise HTTPException(409,'Köpet är redan registrerat')
+        db.execute(text("UPDATE sessions SET status='cancelled' WHERE id=:sid AND status='open'"),{'sid':sid})
+        db.execute(text('DELETE FROM pairings WHERE session_id=:sid'),{'sid':sid})
+    return {'status':'cancelled'}
+
 @app.get('/api/sessions/{sid}/status')
 def sale_session_status(sid: str):
     with engine.connect() as db:
