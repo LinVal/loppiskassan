@@ -48,6 +48,15 @@ def test_ten_registers_thousand_sales_postgres(monkeypatch):
             event_response = client.post('/api/v5/events', json={'name': 'PG belastningstest'})
             assert event_response.status_code == 201, event_response.text
             event_id = event_response.json()['id']
+            # Events are drafts until a named seller is assigned and start is approved.
+            assignment = client.put(
+                f'/api/v5/events/{event_id}/sellers',
+                json={'number': 77, 'name': 'Belastningstest', 'seller_type': 'external'},
+            )
+            assert assignment.status_code == 200, assignment.text
+            start = client.post(f'/api/v5/events/{event_id}/start')
+            assert start.status_code == 200, start.text
+
 
             def register_worker(register_no):
                 # Each thread represents one cash register, sending 100 sales in sequence.
