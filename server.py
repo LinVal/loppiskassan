@@ -115,7 +115,7 @@ def pair_qr(url:str,request:Request):
 async def mobile_photo(token:str,photo:UploadFile=File(...)):
     with engine.begin() as db:
         p=db.execute(text('SELECT * FROM pairings WHERE token=:t'),{'t':token}).mappings().first()
-        if not p or p['used'] or datetime.datetime.fromisoformat(p['expires_at'])<now(): raise HTTPException(403,'Länken har gått ut eller använts')
+        if not p or datetime.datetime.fromisoformat(p['expires_at'])<now(): raise HTTPException(403,'Länken har gått ut eller använts')
         s=session_row(db,p['session_id'])
         if not s or s['status']!='open': raise HTTPException(409,'Köpet är stängt')
         content=await photo.read(12_000_001)
@@ -128,14 +128,13 @@ async def mobile_photo(token:str,photo:UploadFile=File(...)):
         else:
             (UPLOAD/filename).write_bytes(content)
         db.execute(text('INSERT INTO photos VALUES (:id,:s,:f,:c)'),dict(id=pid,s=p['session_id'],f=filename,c=iso(now())))
-        db.execute(text('UPDATE pairings SET used=1 WHERE token=:t'),{'t':token})
-    return {'photo_id':pid,'status':'uploaded','note':'Ingen AI-tolkning är ansluten ännu'}
+    return {'photo_id':pid,'status':'uploaded','note':'Bilden är sparad. AI-avläsning görs i kassan.'}
 
 @app.get('/api/sessions/{sid}/photos')
 def photos(sid:str):
     with engine.connect() as db:
         if not session_row(db,sid): raise HTTPException(404,'Köp saknas')
-        rows=db.execute(text('SELECT id,created_at FROM photos WHERE session_id=:s ORDER BY created_at DESC'),{'s':sid}).mappings().all()
+        rows=db.execute(text('SELECT id,created_at FROM photos WHERE session_id=:s ORDER BY created_at ASC'),{'s':sid}).mappings().all()
     return {'photos':[dict(r, url=f'/api/sessions/{sid}/photos/{r["id"]}') for r in rows]}
 
 @app.get('/api/sessions/{sid}/photos/{pid}')
