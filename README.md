@@ -117,3 +117,9 @@ Administrationen har nu sökning på permanenta säljaridentiteter, historik per
 
 ## Förberedelser inför loppis
 Se `EVENTFORBEREDELSER_OCH_STARTKONTROLL.md` för administratörens arbetsflöde, startkontroll och kvalitetsregler.
+
+
+## Gemensam vänstermeny och rollväljare (demo)
+Öppna `/app` (eller `/admin`). Välj **Administratör** eller **Kassapersonal** i vänstermenyn. Kassapersonal ser enbart **Kassan**, medan administratören ser samtliga administrationsvyer och **Kassan**. Valet sparas lokalt i webbläsaren. Själva kassan fungerar fortsatt direkt på `/`.
+
+**Säkerhet:** Rollväljaren är en UX-demonstration och **ger inga behörigheter**. Den döljer bara menyval. Serverns befintliga autentisering och behörighetskontroller gäller fortfarande. Koppla menyn till inloggad användares serververifierade roll innan produktionsbruk som rollstyrd åtkomst.
