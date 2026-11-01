@@ -7,7 +7,7 @@ async function submitQR(value){
  const scanId=crypto.randomUUID();
  const r=await fetch('/api/mobile/'+encodeURIComponent(token)+'/qr',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scan_id:scanId,payload:value})});
  const data=await r.json();if(!r.ok)throw Error(typeof data.detail==='string'?data.detail:'QR-koden kunde inte skickas');
- qrStatus.textContent='✓ QR-lapp skickad till kassan. Skanna nästa lapp.';
+ qrStatus.textContent=data.status==='already_received'?'ℹ QR-koden finns redan i detta köp – ingen extra vara skapades.':'✓ QR-lapp skickad till kassan. Skanna nästa lapp.';
 }
 function stopQR(){if(qrTimer)clearInterval(qrTimer);qrTimer=null;if(qrStream)qrStream.getTracks().forEach(t=>t.stop());qrStream=null;document.getElementById('qrVideo').srcObject=null;document.getElementById('qrVideo').style.display='none';document.getElementById('stopQR').style.display='none';document.getElementById('startQR').style.display='block'}
 document.getElementById('stopQR').onclick=stopQR;
@@ -29,7 +29,7 @@ async function scanFrame(){
    const key=data.payload||data.scan_id||'';
    if(key===lastQR&&Date.now()-lastQRTime<4500)return;
    lastQR=key;lastQRTime=Date.now();
-   qrStatus.textContent='✓ Vara tillagd i köpet. Skanna nästa QR-kod.';
+   qrStatus.textContent=data.status==='already_received'?'ℹ QR-koden finns redan i köpet. Ingen dubblett skapades.':'✓ Vara tillagd i köpet. Skanna nästa QR-kod.';
    if(navigator.vibrate)navigator.vibrate(100);
   }else if(response.status===422 && typeof data.detail==='string' && data.detail.startsWith('Ingen QR-kod')){
    // No QR in this frame is normal; keep scanning silently.

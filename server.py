@@ -40,6 +40,16 @@ with engine.begin() as db:
     db.execute(text('CREATE TABLE IF NOT EXISTS pairings (token VARCHAR(100) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, expires_at VARCHAR(40) NOT NULL, used INTEGER NOT NULL DEFAULT 0)'))
     db.execute(text('CREATE TABLE IF NOT EXISTS photos (id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, filename VARCHAR(150) NOT NULL, created_at VARCHAR(40) NOT NULL)'))
     db.execute(text('CREATE TABLE IF NOT EXISTS qr_scans (id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) NOT NULL, seller VARCHAR(4) NOT NULL, price INTEGER NOT NULL, description VARCHAR(200) NOT NULL, created_at VARCHAR(40) NOT NULL)'))
+    # A QR payload identifies one item within a purchase. Remove legacy duplicates
+    # before enforcing uniqueness for all future mobile scans.
+    db.execute(text('''DELETE FROM qr_scans WHERE EXISTS (
+      SELECT 1 FROM qr_scans earlier WHERE earlier.session_id=qr_scans.session_id
+      AND earlier.seller=qr_scans.seller AND earlier.price=qr_scans.price
+      AND earlier.description=qr_scans.description
+      AND (earlier.created_at<qr_scans.created_at OR
+           (earlier.created_at=qr_scans.created_at AND earlier.id<qr_scans.id))
+    )'''))
+    db.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS uq_qr_item_per_purchase ON qr_scans(session_id,seller,price,description)'))
     db.execute(text('CREATE TABLE IF NOT EXISTS sales (id VARCHAR(64) PRIMARY KEY, session_id VARCHAR(64) UNIQUE NOT NULL, register_no VARCHAR(16) NOT NULL, total INTEGER NOT NULL, method VARCHAR(40) NOT NULL, recipient VARCHAR(150) NOT NULL, created_at VARCHAR(40) NOT NULL)'))
     db.execute(text('CREATE TABLE IF NOT EXISTS sale_items (id VARCHAR(64) PRIMARY KEY, sale_id VARCHAR(64) NOT NULL, seller VARCHAR(12) NOT NULL, description VARCHAR(200), price INTEGER NOT NULL)'))
     db.execute(text('''CREATE TABLE IF NOT EXISTS item_evidence (item_id VARCHAR(64) PRIMARY KEY, photo_id VARCHAR(64), ai_seller VARCHAR(12), ai_price INTEGER, ai_description VARCHAR(200), ai_uncertain INTEGER NOT NULL DEFAULT 1, FOREIGN KEY(item_id) REFERENCES sale_items(id))'''))
@@ -161,6 +171,14 @@ def mobile_qr(token: str, data: QRScan):
             raise HTTPException(403,'Mobilkopplingen har gått ut. Koppla om mobilen.')
         session=session_row(db,pairing['session_id'])
         if not session or session['status']!='open': raise HTTPException(409,'Köpet är stängt')
+        # Same printed QR payload must not create another row in this purchase.
+        # PostgreSQL serializes competing requests for the same session.
+        if engine.dialect.name=='postgresql':
+            db.execute(text('SELECT pg_advisory_xact_lock(hashtext(:sid))'),{'sid':pairing['session_id']})
+        duplicate=db.execute(text('''SELECT id FROM qr_scans WHERE session_id=:sid
+          AND seller=:seller AND price=:price AND description=:description LIMIT 1'''),
+          {'sid':pairing['session_id'],'seller':str(int(seller)),'price':price,'description':desc}).first()
+        if duplicate: return {'status':'already_received','scan_id':duplicate[0], 'duplicate':True}
         existing=db.execute(text('SELECT id FROM qr_scans WHERE id=:id'),{'id':data.scan_id}).first()
         if existing: return {'status':'already_received','scan_id':data.scan_id}
         db.execute(text('INSERT INTO qr_scans VALUES (:id,:sid,:seller,:price,:description,:created)'),
@@ -183,16 +201,7 @@ async def mobile_qr_photo(token: str, photo: UploadFile = File(...)):
     payload, _, _ = cv2.QRCodeDetector().detectAndDecode(picture)
     if not payload:
         raise HTTPException(422, 'Ingen QR-kod hittades. Håll kameran stilla och fyll bilden med koden.')
-    # Camera sends repeated frames; suppress the same code for a short window.
-    parts = payload.split('|', 3)
-    if len(parts) == 4 and parts[0] == 'LK1':
-        with engine.connect() as db:
-            pairing = db.execute(text('SELECT * FROM pairings WHERE token=:t'), {'t': token}).mappings().first()
-            if pairing and datetime.datetime.fromisoformat(pairing['expires_at']) >= now():
-                previous = db.execute(text('SELECT created_at FROM qr_scans WHERE session_id=:sid AND seller=:seller AND price=:price AND description=:description ORDER BY created_at DESC LIMIT 1'),
-                    {'sid': pairing['session_id'], 'seller': str(int(parts[1])) if parts[1].isdigit() else parts[1], 'price': int(parts[2]) if parts[2].isdigit() else -1, 'description': parts[3]}).first()
-                if previous and (now() - datetime.datetime.fromisoformat(previous[0])).total_seconds() < 4.5:
-                    return {'status': 'already_received', 'payload': payload}
+    # Deduplication is enforced for the entire purchase by mobile_qr.
     result = mobile_qr(token, QRScan(scan_id=str(uuid.uuid4()), payload=payload))
     return {**result, 'payload': payload}
 

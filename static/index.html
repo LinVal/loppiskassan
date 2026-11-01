@@ -197,9 +197,9 @@ async function check(){
    if(seenQR.has(q.id))continue;
    seenQR.add(q.id);qrAdded++;
    const nextId=Math.max(0,...items.map(x=>Number(x.id)||0))+1;
-   items.push({id:nextId,seller:q.seller,price:q.price,desc:q.description,uncertain:true,qrScanId:q.id});
+   items.push({id:nextId,seller:q.seller,price:q.price,desc:q.description,uncertain:false,qrScanId:q.id});
   }
-  if(qrAdded){render();persistDraft();feedback(qrAdded+' QR-lapp(ar) mottagna. Kontrollera säljare och pris i steg 2.','warning');}
+  if(qrAdded){render();persistDraft();feedback(qrAdded+' QR-lapp(ar) verifierade. Kontrollera underlaget före betalning.','success');}
  }catch(e){status('Servern kan inte nås');feedback('Ingen kontakt med servern. Köpet ligger kvar. Kontrollera nätet och försök igen.','warning')}
 }
 async function choosePhoto(pid){
@@ -360,6 +360,21 @@ restoreDraft();
    photoCard.append(photoToggle,photoContent);
    photoToggle.addEventListener('click',()=>{const open=photoCard.classList.toggle('photo-open');photoToggle.setAttribute('aria-expanded',String(open));photoToggle.textContent=open?'Dölj originalbild':'Visa originalbild';});
  }
+ // A4 proof is generated from the current draft BEFORE payment is confirmed.
+ // It is not a receipt and does not commit a sale.
+ const proofSection=document.createElement('section');proofSection.className='card';
+ proofSection.innerHTML='<h3>📄 Kontrollark före betalning</h3><p>Samtliga QR-varor och manuella/AI-lappar i ett gemensamt A4-underlag. Granska detta innan du tar betalt.</p><button type="button" class="secondary" id="openA4Proof">Visa / skriv ut A4-kontrollark</button><p class="muted">Detta är ett utkast, inte en bekräftad försäljning.</p>';
+ function safeText(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+ document.addEventListener('click',event=>{if(event.target?.id!=='openA4Proof')return;
+   const sale=window.cashierViewData?.()||{items:[],total:0};
+   if(!sale.items.length){alert('Skanna eller lägg till varor innan du öppnar kontrollarket.');return;}
+   const win=window.open('','_blank');if(!win){alert('Tillåt popupfönster för att visa A4-arket.');return;}
+   const rows=sale.items.map((item,i)=>{const qr=Boolean(item.qrScanId);
+     const evidence=qr?'QR-kod (verifierad)':'Manuell/AI-lapp';
+     const photo=item.photoId&&window.cashierSaleState?.().sid?'/api/sessions/'+encodeURIComponent(window.cashierSaleState().sid)+'/photos/'+encodeURIComponent(item.photoId):null;
+     return '<article class="label"><strong>Vara '+(i+1)+'</strong><span>'+safeText(evidence)+'</span><div>Säljare: <b>'+safeText(item.seller)+'</b></div><div>Pris: <b>'+safeText(item.price)+' kr</b></div><div>'+safeText(item.desc)+'</div>'+(photo?'<img src="'+safeText(photo)+'" alt="Originalfoto">':'')+(qr?'<div class="payload">QR: LK1|'+safeText(item.seller)+'|'+safeText(item.price)+'|'+safeText(item.desc)+'</div>':'')+'</article>';}).join('');
+   win.document.write('<!doctype html><html lang="sv"><meta charset="utf-8"><title>Kontrollark – ej betalt</title><style>@page{size:A4;margin:12mm}body{font:14px system-ui;color:#222}h1{margin-bottom:4px}.note{background:#fff0b9;padding:10px}.labels{display:grid;grid-template-columns:1fr 1fr;gap:10px}.label{border:1px solid #888;padding:12px;min-height:125px;break-inside:avoid;overflow-wrap:anywhere}.label span{display:block;color:#555;margin:5px 0}.label img{display:block;max-width:100%;max-height:130px;object-fit:contain;margin-top:8px}.payload{font-size:10px;margin-top:8px}@media print{button{display:none}}</style><h1>Loppiskassan – kontrollark</h1><p class="note"><b>EJ BETALT / EJ BEKRÄFTAT</b> – kontrollera mot fysiska lappar.</p><p>'+sale.items.length+' varor · Summa '+safeText(sale.total)+' kr</p><button onclick="print()">Skriv ut A4</button><div class="labels">'+rows+'</div></html>');win.document.close();
+ });
  const nextReview=document.createElement('div');nextReview.className='cashier-nav-actions';nextReview.append(navButton('← Till skanning','scan'),navButton('Fortsätt till betalning →','pay'));
  const backPay=document.createElement('div');backPay.className='cashier-nav-actions';backPay.append(navButton('← Till varugranskning','review'));
  main.insertBefore(tabs,scan);
@@ -388,7 +403,7 @@ restoreDraft();
  views.scan.append(intro('Skanna varor','Koppla mobilen och fotografera. AI läser varje bild automatiskt. Samma mobillänk gäller i fem minuter.'),scan,nextScan);
  const counter=document.createElement('div');counter.id='salePhotoCount';counter.className='sale-photo-count';counter.setAttribute('aria-live','polite');counter.textContent='0 bilder · 0 varor · 0 kr';views.scan.insertBefore(counter,nextScan);
  const galleryScan=document.createElement('div');galleryScan.className='sale-photo-gallery';galleryScan.id='scanPhotoGallery';views.scan.insertBefore(galleryScan,nextScan);
- views.review.append(intro('Granska varorna','Jämför bilden med varuraderna. Rätta säljare, priser och osäkra tolkningar.'),stats,grid,nextReview);
+ views.review.append(intro('Granska varorna','Jämför bilden med varuraderna. Rätta säljare, priser och osäkra tolkningar.'),stats,grid,proofSection,nextReview);
  // Behåll historikens DOM-element för befintliga JS-lyssnare, men visa aldrig demodata i skarpt läge.
  views.history.append(history);
  // Knapparna ändrar bara synlig vy; den befintliga köp-/betalningslogiken är oförändrad.
